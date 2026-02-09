@@ -1,0 +1,271 @@
+/**
+ * Página: AdminDashboard
+ * =======================
+ * Dashboard principal para administradores con diseño CONAFE
+ *
+ * Características:
+ * - Gestión de archivos Master (subida, validación)
+ * - Procesamiento de CEA
+ * - Visualización de historial
+ * - Descarga de archivos CEA
+ * - Diseño profesional con paleta CONAFE
+ * - Actualizaciones en tiempo real con Supabase Realtime
+ */
+
+import { useState } from 'react';
+import { useAuthStore } from '../store/authStore';
+import { useMasterUploadsRealtime, useCeaFilesRealtime } from '../hooks/useRealtime';
+import { MasterUpload } from '../components/admin/MasterUpload';
+
+// ============================================================================
+// Componente Principal
+// ============================================================================
+
+/**
+ * Dashboard de administrador
+ */
+export function AdminDashboard() {
+  const { user, profile, logout } = useAuthStore();
+
+  // ============================================================================
+  // Estado para contadores de eventos en tiempo real
+  // ============================================================================
+  const [masterUpdates, setMasterUpdates] = useState(0);
+  const [ceaUpdates, setCeaUpdates] = useState(0);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
+
+  // ============================================================================
+  // Configurar Realtime para Master Uploads
+  // ============================================================================
+  useMasterUploadsRealtime({
+    onUpdate: (payload) => {
+      console.log('🔄 Master actualizado:', payload.new);
+      setMasterUpdates(prev => prev + 1);
+      setRealtimeConnected(true);
+
+      // Ejemplo: Mostrar notificación cuando un Master es validado
+      if (payload.new.status === 'validated') {
+        console.log('✅ Master validado:', payload.new.file_name);
+      } else if (payload.new.status === 'error') {
+        console.log('❌ Error en Master:', payload.new.file_name);
+      }
+    },
+    onInsert: (payload) => {
+      console.log('📄 Nuevo Master subido:', payload.new);
+      setMasterUpdates(prev => prev + 1);
+      setRealtimeConnected(true);
+    },
+  });
+
+  // ============================================================================
+  // Configurar Realtime para CEA Files
+  // ============================================================================
+  useCeaFilesRealtime({
+    onUpdate: (payload) => {
+      console.log('🔄 CEA actualizado:', payload.new);
+      setCeaUpdates(prev => prev + 1);
+      setRealtimeConnected(true);
+
+      // Ejemplo: Mostrar notificación cuando un CEA se completa
+      if (payload.new.processing_status === 'completed') {
+        console.log('✅ CEA generado exitosamente:', payload.new.file_name);
+      } else if (payload.new.processing_status === 'failed') {
+        console.log('❌ Error al generar CEA:', payload.new.file_name);
+      }
+    },
+    onInsert: (payload) => {
+      console.log('📊 Nuevo CEA iniciado:', payload.new);
+      setCeaUpdates(prev => prev + 1);
+      setRealtimeConnected(true);
+    },
+  });
+
+  // ============================================================================
+  // Manejador de logout
+  // ============================================================================
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error('Error al cerrar sesión:', error);
+    }
+  };
+
+  // ============================================================================
+  // Render
+  // ============================================================================
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-conafe-gris-100 to-white">
+      {/* Header con estilo CONAFE */}
+      <header className="bg-white shadow-md border-b-4 border-conafe-guinda">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+          <div className="flex items-center justify-between">
+            {/* Logo y Título */}
+            <div className="flex items-center space-x-4">
+              {/* Logo CONAFE */}
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-guinda shadow-lg">
+                <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+
+              <div>
+                <h1 className="text-2xl font-bold text-conafe-guinda">
+                  Panel de Administración
+                </h1>
+                <p className="text-sm text-conafe-gris-600">
+                  Sistema de Gestión de Archivos Excel CEA
+                </p>
+              </div>
+            </div>
+
+            {/* User menu */}
+            <div className="flex items-center space-x-4">
+              {/* Información del usuario */}
+              <div className="text-right hidden md:block">
+                <p className="text-sm font-semibold text-conafe-gris-900">
+                  {profile?.full_name || user?.email}
+                </p>
+                <p className="text-xs text-conafe-gris-600">
+                  Rol: <span className="font-bold text-conafe-guinda uppercase">{profile?.role}</span>
+                </p>
+              </div>
+
+              {/* Indicador de Realtime */}
+              <div className="hidden lg:flex items-center space-x-2 px-3 py-1 rounded-full bg-conafe-verde-light border border-conafe-verde">
+                <div className={`w-2 h-2 rounded-full ${realtimeConnected ? 'bg-conafe-verde animate-pulse' : 'bg-conafe-gris-600'}`} />
+                <span className="text-xs font-medium text-conafe-verde">
+                  {realtimeConnected ? 'En Vivo' : 'Conectando...'}
+                </span>
+                {(masterUpdates > 0 || ceaUpdates > 0) && (
+                  <span className="text-xs text-conafe-gris-600">
+                    ({masterUpdates + ceaUpdates})
+                  </span>
+                )}
+              </div>
+
+              {/* Badge de Admin */}
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-conafe-guinda text-white shadow-md">
+                <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                </svg>
+                Administrador
+              </span>
+
+              {/* Botón de logout */}
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-semibold rounded-lg text-white bg-conafe-guinda hover:bg-conafe-guinda-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-conafe-guinda transition-all duration-200 shadow-md hover:shadow-lg"
+              >
+                <svg
+                  className="mr-2 -ml-1 h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                  />
+                </svg>
+                Cerrar Sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Tarjetas de funcionalidades */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {/* Card 1: Archivos Master */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-conafe-guinda hover:shadow-xl transition-shadow">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-guinda/10">
+                <svg className="w-6 h-6 text-conafe-guinda" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </div>
+              <span className="text-xs font-semibold text-conafe-gris-600">PRÓXIMO</span>
+            </div>
+            <h3 className="text-lg font-bold text-conafe-gris-900 mb-2">
+              Subir Masters
+            </h3>
+            <p className="text-sm text-conafe-gris-600">
+              Carga los 4 archivos Master (alumnos, servicios, figuras, telefonía)
+            </p>
+          </div>
+
+          {/* Card 2: Validación */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-conafe-verde hover:shadow-xl transition-shadow">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-verde/10">
+                <svg className="w-6 h-6 text-conafe-verde" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <span className="text-xs font-semibold text-conafe-gris-600">PRÓXIMO</span>
+            </div>
+            <h3 className="text-lg font-bold text-conafe-gris-900 mb-2">
+              Validación
+            </h3>
+            <p className="text-sm text-conafe-gris-600">
+              Verifica estructura y datos de los archivos Master
+            </p>
+          </div>
+
+          {/* Card 3: Generar CEA */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-conafe-azul hover:shadow-xl transition-shadow">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-azul/10">
+                <svg className="w-6 h-6 text-conafe-azul" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <span className="text-xs font-semibold text-conafe-gris-600">PRÓXIMO</span>
+            </div>
+            <h3 className="text-lg font-bold text-conafe-gris-900 mb-2">
+              Generar CEA
+            </h3>
+            <p className="text-sm text-conafe-gris-600">
+              Procesa los Masters y genera el reporte CEA
+            </p>
+          </div>
+
+          {/* Card 4: Historial */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-conafe-ambar hover:shadow-xl transition-shadow">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-ambar/10">
+                <svg className="w-6 h-6 text-conafe-ambar" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <span className="text-xs font-semibold text-conafe-gris-600">PRÓXIMO</span>
+            </div>
+            <h3 className="text-lg font-bold text-conafe-gris-900 mb-2">
+              Historial
+            </h3>
+            <p className="text-sm text-conafe-gris-600">
+              Consulta y descarga CEAs generados previamente
+            </p>
+          </div>
+        </div>
+
+        {/* Panel principal - Componente de subida de Masters */}
+        <div className="bg-white rounded-2xl shadow-xl p-8 border border-conafe-gris-300">
+          <MasterUpload />
+        </div>
+
+        {/* Footer informativo */}
+        <div className="mt-8 text-center">
+          <p className="text-sm text-conafe-gris-600">
+            Consejo Nacional de Fomento Educativo • Sistema CEA {new Date().getFullYear()}
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}

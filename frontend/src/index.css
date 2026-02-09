@@ -1,0 +1,55 @@
+/* Directivas de Tailwind CSS */
+@import "tailwindcss";
+
+/* Colores CONAFE personalizados - Tailwind v4 */
+@theme {
+  --color-conafe-guinda: #8F363C;
+  --color-conafe-guinda-dark: #6E292D;
+  --color-conafe-guinda-light: #B45A60;
+  --color-conafe-verde: #1F7A5A;
+  --color-conafe-verde-light: #D9EFE7;
+  --color-conafe-ambar: #F2B705;
+  --color-conafe-azul: #2F6FED;
+  --color-conafe-gris-100: #F5F5F5;
+  --color-conafe-gris-300: #CFCFCF;
+  --color-conafe-gris-600: #5A5A5A;
+  --color-conafe-gris-900: #1F1F1F;
+}
+
+/* Estilos base personalizados */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 12%;
+    /* Guinda CONAFE como color primario */
+    --primary: 356 45% 39%;
+    --primary-foreground: 0 0% 100%;
+    /* Verde institucional como secundario */
+    --secondary: 160 60% 30%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 35%;
+    --accent: 160 82% 93%;
+    --accent-foreground: 160 60% 30%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 81%;
+    --input: 0 0% 81%;
+    --ring: 356 45% 39%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
