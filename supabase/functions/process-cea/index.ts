@@ -9,8 +9,8 @@
  * 1. Valida que el usuario sea admin
  * 2. Verifica que haya exactamente 4 Masters validados en el batch
  * 3. Descarga los 4 archivos Master desde Storage
- * 4. Procesa cada archivo con Danfo.js (tipo pandas)
- * 5. Fusiona los datos y genera el DataFrame CEA
+ * 4. Procesa cada archivo con SheetJS (lectura Excel)
+ * 5. Fusiona los datos y genera el CONCENTRADO CEA
  * 6. Genera el archivo Excel con formato profesional
  * 7. Sube el CEA a Storage
  * 8. Actualiza la base de datos
@@ -41,8 +41,7 @@ import {
   processMasterAlumnos,
   processMasterServicios,
   processMasterFiguras,
-  agruparAlumnosPorMicroregion,
-  generarDataframeCEA,
+  generarCEA,
 } from './utils/dataProcessor.ts';
 import {
   generateCeaExcel,
@@ -197,8 +196,8 @@ serve(async (req: Request) => {
       throw new Error(`Error descargando Master de Figuras: ${figurasDownloadError?.message}`);
     }
 
-    // 11. Procesar cada archivo con Danfo.js
-    console.log('🐼 Procesando datos con Danfo.js...');
+    // 11. Procesar cada archivo Master
+    console.log('📊 Procesando datos de archivos Master...');
 
     const alumnosData = await processMasterAlumnos(await alumnosBlob.arrayBuffer());
     const serviciosData = await processMasterServicios(await serviciosBlob.arrayBuffer());
@@ -206,21 +205,18 @@ serve(async (req: Request) => {
 
     console.log('✅ Archivos Master procesados exitosamente');
 
-    // 12. Agrupar alumnos por microrregión
-    const alumnosAgrupados = agruparAlumnosPorMicroregion(alumnosData);
+    // 12. Generar CONCENTRADO CEA fusionando todos los datos
+    console.log('🔄 Generando CONCENTRADO CEA...');
+    const ceaData = generarCEA(alumnosData, serviciosData, figurasData);
 
-    // 13. Generar DataFrame CEA fusionando todos los datos
-    console.log('🔄 Generando DataFrame CEA...');
-    const ceaDataFrame = generarDataframeCEA(alumnosAgrupados, serviciosData, figurasData);
+    // 13. Validar que los datos CEA sean correctos
+    validateCeaData(ceaData);
 
-    // 14. Validar que los datos CEA sean correctos
-    validateCeaData(ceaDataFrame);
+    console.log(`✅ CONCENTRADO CEA generado: ${ceaData.length} microrregiones`);
 
-    console.log(`✅ DataFrame CEA generado: ${ceaDataFrame.length} microrregiones`);
-
-    // 15. Generar archivo Excel con formato
+    // 14. Generar archivo Excel con formato
     console.log('📝 Generando archivo Excel con formato...');
-    const excelBuffer = await generateCeaExcel(ceaDataFrame, {
+    const excelBuffer = await generateCeaExcel(ceaData, {
       sheetName: 'CONCENTRADO',
       applyFormatting: true,
       autoFitColumns: true,
@@ -228,7 +224,7 @@ serve(async (req: Request) => {
 
     console.log(`✅ Archivo Excel generado: ${excelBuffer.byteLength} bytes`);
 
-    // 16. Subir archivo CEA a Storage
+    // 15. Subir archivo CEA a Storage
     console.log(`📤 Subiendo CEA a Storage: ${ceaFilePath}`);
 
     const { error: uploadError } = await supabase.storage
@@ -244,16 +240,16 @@ serve(async (req: Request) => {
 
     console.log('✅ CEA subido a Storage exitosamente');
 
-    // 17. Calcular tiempo de procesamiento
+    // 16. Calcular tiempo de procesamiento
     const processingTimeMs = Date.now() - startTime;
 
-    // 18. Actualizar registro CEA con estado 'completed'
+    // 17. Actualizar registro CEA con estado 'completed'
     const { error: updateError } = await supabase
       .from('cea_files')
       .update({
         file_size: excelBuffer.byteLength,
         processing_status: 'completed',
-        total_records: ceaDataFrame.length,
+        total_records: ceaData.length,
         processing_time_ms: processingTimeMs,
         is_latest: true, // Marcar como el más reciente
       })
@@ -264,7 +260,7 @@ serve(async (req: Request) => {
       // No fallar aquí, el archivo ya se subió exitosamente
     }
 
-    // 19. Marcar todos los CEAs anteriores como no-latest
+    // 18. Marcar todos los CEAs anteriores como no-latest
     await supabase
       .from('cea_files')
       .update({ is_latest: false })
@@ -275,7 +271,7 @@ serve(async (req: Request) => {
     console.log(`🎉 CEA generado exitosamente en ${processingTimeMs}ms`);
     console.log('🎉 ========================================');
 
-    // 20. Retornar respuesta de éxito
+    // 19. Retornar respuesta de éxito
     return corsJsonResponse({
       success: true,
       message: 'CEA generado exitosamente',
@@ -283,7 +279,7 @@ serve(async (req: Request) => {
         ceaId: ceaRecord.id,
         fileName: ceaFileName,
         filePath: ceaFilePath,
-        totalRecords: ceaDataFrame.length,
+        totalRecords: ceaData.length,
         processingTimeMs,
         fileSize: excelBuffer.byteLength,
       },

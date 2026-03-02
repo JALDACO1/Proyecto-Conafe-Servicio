@@ -7,6 +7,7 @@
  */
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 
 // ============================================================================
@@ -141,7 +142,7 @@ export const DialogPortal: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Renderizar en un portal (fuera del árbol DOM)
   return typeof document !== 'undefined'
-    ? React.createPortal(children, document.body)
+    ? createPortal(children, document.body)
     : null;
 };
 

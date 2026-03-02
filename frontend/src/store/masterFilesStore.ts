@@ -200,10 +200,16 @@ export const useMasterFilesStore = create<MasterFilesState>((set, get) => ({
       }));
 
       // 3. Subir archivo a Storage
-      console.log(`📤 Subiendo archivo: ${file.name}`);
+      // Sanitizar nombre: eliminar acentos/caracteres especiales y espacios
+      const sanitizedFileName = file.name
+        .normalize('NFD')                          // Descomponer acentos (é → e + ́)
+        .replace(/[\u0300-\u036f]/g, '')           // Eliminar marcas diacríticas
+        .replace(/[^a-zA-Z0-9._-]/g, '_');         // Reemplazar caracteres no válidos por _
+
+      console.log(`📤 Subiendo archivo: ${file.name} → ${sanitizedFileName}`);
       const uploadResult = await uploadFile({
         bucket: 'master-files',
-        path: `batch-${currentBatchId}/${file.name}`,
+        path: `batch-${currentBatchId}/${sanitizedFileName}`,
         file: file,
         upsert: false,
       });

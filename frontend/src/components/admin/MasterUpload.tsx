@@ -25,6 +25,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { useCeaStore } from '@/store/ceaStore';
+import { Spinner } from '@/components/ui/spinner';
+import { useMasterUploadsRealtime } from '@/hooks/useRealtime';
 import type { MasterFileType } from '@/types/database.types';
 
 // ============================================================================
@@ -58,39 +61,58 @@ export const MasterUpload: React.FC = () => {
     deleteFile,
     currentBatchId,
     createNewBatch,
-    canProcessBatch,
+    fetchFiles,
     error: storeError,
     clearError,
     uploadProgress,
+    files,
   } = useMasterFilesStore();
 
   // ============================================================================
-  // Estado local
+  // Estado del store CEA
   // ============================================================================
-  const [canProcess, setCanProcess] = React.useState(false);
+  const { generateCea, processingStatus } = useCeaStore();
+
+  // ============================================================================
+  // Derivar canProcess del estado local de archivos
+  // ============================================================================
+  const canProcess = React.useMemo(() => {
+    const batchFiles = files.filter(
+      (f) =>
+        f.upload_batch_id === currentBatchId &&
+        (f.status === 'validated' || f.status === 'uploaded')
+    );
+    const uniqueTypes = new Set(batchFiles.map((f) => f.file_type));
+    return uniqueTypes.size === 4;
+  }, [files, currentBatchId]);
+
+  // ============================================================================
+  // Realtime: escuchar cambios de status en master_uploads
+  // ============================================================================
+  const handleRealtimeUpdate = React.useCallback(() => {
+    // Cuando un archivo cambia de status (ej: uploaded → validated), refrescar lista
+    if (currentBatchId) {
+      fetchFiles(currentBatchId);
+    }
+  }, [currentBatchId, fetchFiles]);
+
+  useMasterUploadsRealtime({
+    onUpdate: handleRealtimeUpdate,
+    enabled: !!currentBatchId,
+  });
+
+  // ============================================================================
+  // Cargar archivos del batch al montar o cambiar de batch
+  // ============================================================================
+  React.useEffect(() => {
+    if (currentBatchId) {
+      fetchFiles(currentBatchId);
+    }
+  }, [currentBatchId, fetchFiles]);
 
   // ============================================================================
   // Manejadores
   // ============================================================================
-
-  /**
-   * Verifica el estado del batch
-   */
-  const checkBatchStatus = React.useCallback(async () => {
-    const ready = await canProcessBatch();
-    setCanProcess(ready);
-  }, [canProcessBatch]);
-
-  // ============================================================================
-  // Efectos
-  // ============================================================================
-
-  /**
-   * Verificar si se puede procesar el batch cuando cambie el batch ID
-   */
-  React.useEffect(() => {
-    checkBatchStatus();
-  }, [currentBatchId, checkBatchStatus]); // Depender del batch ID y la función memorizada
 
   /**
    * Maneja la selección de un archivo
@@ -98,11 +120,8 @@ export const MasterUpload: React.FC = () => {
   const handleFileSelect = async (file: File, fileType: MasterFileType) => {
     try {
       await uploadMasterFile(file, fileType);
-      // Verificar batch después de subir
-      await checkBatchStatus();
     } catch (err) {
       console.error('Error subiendo archivo:', err);
-      // El error ya se maneja en el store
     }
   };
 
@@ -114,11 +133,21 @@ export const MasterUpload: React.FC = () => {
     if (file) {
       try {
         await deleteFile(file.id);
-        // Verificar batch después de eliminar
-        await checkBatchStatus();
       } catch (err) {
         console.error('Error eliminando archivo:', err);
       }
+    }
+  };
+
+  /**
+   * Maneja la generación de CEA
+   */
+  const handleGenerateCea = async () => {
+    if (!currentBatchId) return;
+    try {
+      await generateCea(currentBatchId);
+    } catch (err) {
+      console.error('Error generando CEA:', err);
     }
   };
 
@@ -307,6 +336,9 @@ export const MasterUpload: React.FC = () => {
                     {existingFile.status === 'validated' && (
                       <Badge variant="success">Validado</Badge>
                     )}
+                    {existingFile.status === 'uploaded' && (
+                      <Badge variant="secondary">Subido</Badge>
+                    )}
                     {existingFile.status === 'validating' && (
                       <Badge variant="default">Validando...</Badge>
                     )}
@@ -348,6 +380,55 @@ export const MasterUpload: React.FC = () => {
         })}
       </div>
 
+      {/* Botón Generar CEA */}
+      <div className="bg-white border border-conafe-gris-300 rounded-2xl shadow-xl overflow-hidden">
+        <div className="px-6 py-5 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Generar CEA</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              {canProcess
+                ? 'Los 4 Masters están validados. Puedes generar el CEA.'
+                : 'Sube y valida los 4 archivos Master para habilitar la generación.'}
+            </p>
+          </div>
+          <Button
+            size="lg"
+            onClick={handleGenerateCea}
+            disabled={!canProcess || processingStatus?.isProcessing}
+            className="bg-conafe-verde hover:bg-conafe-verde/90 text-white px-6"
+          >
+            {processingStatus?.isProcessing ? (
+              <>
+                <Spinner size="sm" className="mr-2" />
+                {processingStatus.message || 'Procesando...'}
+              </>
+            ) : (
+              <>
+                <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+                Generar CEA
+              </>
+            )}
+          </Button>
+        </div>
+        {processingStatus?.isProcessing && (
+          <div className="px-6 pb-4">
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-conafe-verde h-2 rounded-full transition-all duration-500"
+                style={{ width: `${processingStatus.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {processingStatus?.error && (
+          <div className="px-6 pb-4">
+            <p className="text-sm text-red-600">{processingStatus.error}</p>
+          </div>
+        )}
+      </div>
+
       {/* Instrucciones */}
       <Alert>
         <AlertTitle>📌 Instrucciones</AlertTitle>
@@ -355,7 +436,7 @@ export const MasterUpload: React.FC = () => {
           <ol className="list-decimal list-inside space-y-1 text-sm">
             <li>Sube los 4 archivos Master (uno de cada tipo)</li>
             <li>Espera a que se validen automáticamente (marca verde ✓)</li>
-            <li>Una vez validados los 4, podrás generar el CEA</li>
+            <li>Una vez validados los 4, presiona <strong>Generar CEA</strong></li>
           </ol>
         </AlertDescription>
       </Alert>

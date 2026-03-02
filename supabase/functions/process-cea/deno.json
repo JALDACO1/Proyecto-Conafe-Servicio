@@ -2,7 +2,6 @@
   "imports": {
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs",
-    "exceljs": "https://esm.sh/exceljs@4.3.0",
-    "danfojs": "https://cdn.jsdelivr.net/npm/danfojs@1.1.2/dist/danfojs-base/+esm"
+    "exceljs": "https://esm.sh/exceljs@4.3.0"
   }
 }

@@ -514,6 +514,41 @@ export async function getCeaById(
   }
 }
 
+/**
+ * Elimina un archivo CEA de la base de datos
+ *
+ * @param ceaId - ID del CEA a eliminar
+ * @returns Promise<DatabaseResult> indicando éxito o error
+ */
+export async function deleteCeaFile(
+  ceaId: string
+): Promise<DatabaseResult> {
+  try {
+    const { error } = await supabase
+      .from('cea_files')
+      .delete()
+      .eq('id', ceaId);
+
+    if (error) {
+      console.error('❌ Error eliminando CEA:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+
+    return {
+      success: true,
+    };
+  } catch (error) {
+    console.error('❌ Error en deleteCeaFile:', error);
+    return {
+      success: false,
+      error: 'Error inesperado al eliminar CEA',
+    };
+  }
+}
+
 // ============================================================================
 // OPERACIONES SOBRE TABLA: processing_logs
 // ============================================================================
