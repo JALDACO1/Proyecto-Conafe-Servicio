@@ -16,6 +16,9 @@ import { useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useMasterUploadsRealtime, useCeaFilesRealtime } from '../hooks/useRealtime';
 import { MasterUpload } from '../components/admin/MasterUpload';
+import { HistorialMasters } from '../components/admin/HistorialMasters';
+import { HistorialCea } from '../components/admin/HistorialCea';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 
 // ============================================================================
 // Componente Principal
@@ -28,8 +31,9 @@ export function AdminDashboard() {
   const { user, profile, logout } = useAuthStore();
 
   // ============================================================================
-  // Estado para contadores de eventos en tiempo real
+  // Estado para pestaña activa y contadores de eventos en tiempo real
   // ============================================================================
+  const [activeTab, setActiveTab] = useState('subir-masters');
   const [masterUpdates, setMasterUpdates] = useState(0);
   const [ceaUpdates, setCeaUpdates] = useState(0);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
@@ -122,14 +126,14 @@ export function AdminDashboard() {
             {/* User menu */}
             <div className="flex items-center space-x-4">
               {/* Información del usuario */}
-              <div className="text-right hidden md:block">
+              {/* <div className="text-right hidden md:block">
                 <p className="text-sm font-semibold text-conafe-gris-900">
                   {profile?.full_name || user?.email}
                 </p>
                 <p className="text-xs text-conafe-gris-600">
                   Rol: <span className="font-bold text-conafe-guinda uppercase">{profile?.role}</span>
                 </p>
-              </div>
+              </div> */}
 
               {/* Indicador de Realtime */}
               <div className="hidden lg:flex items-center space-x-2 px-3 py-1 rounded-full bg-conafe-verde-light border border-conafe-verde">
@@ -179,85 +183,55 @@ export function AdminDashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Tarjetas de funcionalidades */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {/* Card 1: Archivos Master */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-conafe-guinda hover:shadow-xl transition-shadow">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-guinda/10">
-                <svg className="w-6 h-6 text-conafe-guinda" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-              </div>
-              <span className="text-xs font-semibold text-conafe-gris-600">PRÓXIMO</span>
-            </div>
-            <h3 className="text-lg font-bold text-conafe-gris-900 mb-2">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          {/* Barra de pestañas */}
+          <TabsList className="w-full grid grid-cols-3 h-12 bg-conafe-gris-100 rounded-xl mb-6 p-1">
+            <TabsTrigger
+              value="subir-masters"
+              className="aria-selected:bg-conafe-guinda aria-selected:text-white aria-selected:shadow-lg rounded-lg text-sm font-semibold transition-all"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
               Subir Masters
-            </h3>
-            <p className="text-sm text-conafe-gris-600">
-              Carga los 4 archivos Master (alumnos, servicios, figuras, telefonía)
-            </p>
-          </div>
+            </TabsTrigger>
+            <TabsTrigger
+              value="historial-masters"
+              className="aria-selected:bg-conafe-guinda aria-selected:text-white aria-selected:shadow-lg rounded-lg text-sm font-semibold transition-all"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+              Historial Masters
+            </TabsTrigger>
+            <TabsTrigger
+              value="historial-cea"
+              className="aria-selected:bg-conafe-guinda aria-selected:text-white aria-selected:shadow-lg rounded-lg text-sm font-semibold transition-all"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Historial CEA
+            </TabsTrigger>
+          </TabsList>
 
-          {/* Card 2: Validación */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-conafe-verde hover:shadow-xl transition-shadow">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-verde/10">
-                <svg className="w-6 h-6 text-conafe-verde" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <span className="text-xs font-semibold text-conafe-gris-600">PRÓXIMO</span>
+          {/* Pestaña 1: Subir Masters - mismo panel que antes */}
+          <TabsContent value="subir-masters">
+            <div className="bg-white rounded-2xl shadow-xl p-8 border border-conafe-gris-300">
+              <MasterUpload />
             </div>
-            <h3 className="text-lg font-bold text-conafe-gris-900 mb-2">
-              Validación
-            </h3>
-            <p className="text-sm text-conafe-gris-600">
-              Verifica estructura y datos de los archivos Master
-            </p>
-          </div>
+          </TabsContent>
 
-          {/* Card 3: Generar CEA */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-conafe-azul hover:shadow-xl transition-shadow">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-azul/10">
-                <svg className="w-6 h-6 text-conafe-azul" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
-              <span className="text-xs font-semibold text-conafe-gris-600">PRÓXIMO</span>
-            </div>
-            <h3 className="text-lg font-bold text-conafe-gris-900 mb-2">
-              Generar CEA
-            </h3>
-            <p className="text-sm text-conafe-gris-600">
-              Procesa los Masters y genera el reporte CEA
-            </p>
-          </div>
+          {/* Pestaña 2: Historial Masters */}
+          <TabsContent value="historial-masters">
+            <HistorialMasters />
+          </TabsContent>
 
-          {/* Card 4: Historial */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border-t-4 border-conafe-ambar hover:shadow-xl transition-shadow">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-conafe-ambar/10">
-                <svg className="w-6 h-6 text-conafe-ambar" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <span className="text-xs font-semibold text-conafe-gris-600">PRÓXIMO</span>
-            </div>
-            <h3 className="text-lg font-bold text-conafe-gris-900 mb-2">
-              Historial
-            </h3>
-            <p className="text-sm text-conafe-gris-600">
-              Consulta y descarga CEAs generados previamente
-            </p>
-          </div>
-        </div>
-
-        {/* Panel principal - Componente de subida de Masters */}
-        <div className="bg-white rounded-2xl shadow-xl p-8 border border-conafe-gris-300">
-          <MasterUpload />
-        </div>
+          {/* Pestaña 3: Historial CEA */}
+          <TabsContent value="historial-cea">
+            <HistorialCea />
+          </TabsContent>
+        </Tabs>
 
         {/* Footer informativo */}
         <div className="mt-8 text-center">

@@ -1,392 +1,314 @@
 /**
  * Excel Writer con ExcelJS
  * =========================
- * Genera archivos Excel CEA con formato profesional usando ExcelJS
+ * Genera el archivo CEA con formato profesional.
  *
- * Características:
- * - Headers con colores y fuentes bold
- * - Bordes en todas las celdas
- * - Auto-ajuste de anchos de columna
- * - Formato numérico para totales
- * - Alineación de celdas
+ * Estructura del CONCENTRADO (basada en el CEA ejemplo real):
+ * - Fila 1: Título "Total X Figura"
+ * - Fila 2: Headers principales (Microrregión, ECA, Coord., categorías agrupadas...)
+ * - Fila 3: Sub-headers de género (M, F)
+ * - Fila 4+: Datos
  */
 
 import ExcelJS from 'exceljs';
+import type { CeaRow } from '../../_shared/types.ts';
 
 // ============================================================================
-// Tipos
+// Opciones
 // ============================================================================
 
-/**
- * Datos del CEA para escribir al Excel
- * Cada objeto representa una fila (microrregión)
- */
-export interface CeaData {
-  Microregion: string;
-  'Educador Comunitario de Acompañamiento': string;
-  'Coordinador de Seguimiento': string;
-  Inicial_M: number;
-  Inicial_F: number;
-  Preescolar_M: number;
-  Preescolar_F: number;
-  CIC_M: number;
-  CIC_F: number;
-  PreeMig_M: number;
-  PreeMig_F: number;
-  Prim_M: number;
-  Prim_F: number;
-  Sec_M: number;
-  Sec_F: number;
-  Total_M: number;
-  Total_F: number;
-  Total_Gen: number;
-  Metas: number;
-  Faltantes: number;
-}
-
-/**
- * Opciones de configuración para el generador de Excel
- */
 export interface ExcelWriterOptions {
-  sheetName?: string;          // Nombre de la hoja (default: "CONCENTRADO")
-  includeHeaders?: boolean;    // Incluir fila de headers (default: true)
-  applyFormatting?: boolean;   // Aplicar formato de colores/bordes (default: true)
-  autoFitColumns?: boolean;    // Auto-ajustar anchos de columna (default: true)
+  sheetName?: string;
+  applyFormatting?: boolean;
+  autoFitColumns?: boolean;
 }
 
 // ============================================================================
-// Configuración de estilos
+// Estilos
+// ============================================================================
+
+const COLORS = {
+  headerBg: 'FF4472C4',
+  headerText: 'FFFFFFFF',
+  subHeaderBg: 'FFD9E2F3',
+  subHeaderText: 'FF000000',
+  titleBg: 'FF2F5496',
+  titleText: 'FFFFFFFF',
+  totalBg: 'FFFFD966',
+  totalText: 'FF000000',
+  negativeBg: 'FFFF6B6B',
+  negativeText: 'FFFFFFFF',
+  dataBorder: 'FFB4C6E7',
+};
+
+const BORDER_THIN = {
+  top: { style: 'thin' as const, color: { argb: 'FF000000' } },
+  bottom: { style: 'thin' as const, color: { argb: 'FF000000' } },
+  left: { style: 'thin' as const, color: { argb: 'FF000000' } },
+  right: { style: 'thin' as const, color: { argb: 'FF000000' } },
+};
+
+const BORDER_MEDIUM = {
+  top: { style: 'medium' as const, color: { argb: 'FF000000' } },
+  bottom: { style: 'medium' as const, color: { argb: 'FF000000' } },
+  left: { style: 'medium' as const, color: { argb: 'FF000000' } },
+  right: { style: 'medium' as const, color: { argb: 'FF000000' } },
+};
+
+// ============================================================================
+// Estructura de columnas del CONCENTRADO
 // ============================================================================
 
 /**
- * Colores del tema (en formato hex)
+ * Definición de las columnas del CONCENTRADO.
+ * Las columnas de modalidad van en pares M/F y se agrupan bajo un header principal.
  */
-const COLORS = {
-  // Header principal
-  headerBackground: 'FF4472C4',    // Azul oscuro
-  headerText: 'FFFFFFFF',          // Blanco
+const FIXED_COLUMNS = [
+  { key: 'Microregion', header: 'Microrregión', width: 22 },
+  { key: 'ECA', header: 'Educador Comunitario\nde Acompañamiento', width: 30 },
+  { key: 'CoordinadorSeguimiento', header: 'Coordinador\nde Seguimiento', width: 28 },
+];
 
-  // Secciones
-  sectionBackground: 'FFD9E2F3',   // Azul claro
-  sectionText: 'FF000000',         // Negro
+const MODALIDAD_COLUMNS = [
+  { name: 'Inicial', keyM: 'Inicial_M', keyF: 'Inicial_F' },
+  { name: 'Preescolar', keyM: 'Preescolar_M', keyF: 'Preescolar_F' },
+  { name: 'CIC', keyM: 'CIC_M', keyF: 'CIC_F' },
+  { name: 'PreeMig', keyM: 'PreeMig_M', keyF: 'PreeMig_F' },
+  { name: 'Prim', keyM: 'Prim_M', keyF: 'Prim_F' },
+  { name: 'Sec', keyM: 'Sec_M', keyF: 'Sec_F' },
+];
 
-  // Datos
-  dataBackground: 'FFFFFFFF',      // Blanco
-  dataText: 'FF000000',            // Negro
+const TOTAL_COLUMNS = [
+  { name: 'Total x Gén', keyM: 'Total_M', keyF: 'Total_F' },
+];
 
-  // Totales
-  totalBackground: 'FFFFD966',     // Amarillo claro
-  totalText: 'FF000000',           // Negro
-
-  // Negativos (faltantes)
-  negativeBackground: 'FFFF6B6B',  // Rojo claro
-  negativeText: 'FFFFFFFF',        // Blanco
-};
-
-/**
- * Estilos de fuente
- */
-const FONTS = {
-  header: {
-    name: 'Calibri',
-    size: 12,
-    bold: true,
-    color: { argb: COLORS.headerText },
-  },
-  data: {
-    name: 'Calibri',
-    size: 11,
-    bold: false,
-    color: { argb: COLORS.dataText },
-  },
-  total: {
-    name: 'Calibri',
-    size: 11,
-    bold: true,
-    color: { argb: COLORS.totalText },
-  },
-};
-
-/**
- * Estilos de bordes
- */
-const BORDERS = {
-  thin: {
-    top: { style: 'thin' as const, color: { argb: 'FF000000' } },
-    bottom: { style: 'thin' as const, color: { argb: 'FF000000' } },
-    left: { style: 'thin' as const, color: { argb: 'FF000000' } },
-    right: { style: 'thin' as const, color: { argb: 'FF000000' } },
-  },
-  medium: {
-    top: { style: 'medium' as const, color: { argb: 'FF000000' } },
-    bottom: { style: 'medium' as const, color: { argb: 'FF000000' } },
-    left: { style: 'medium' as const, color: { argb: 'FF000000' } },
-    right: { style: 'medium' as const, color: { argb: 'FF000000' } },
-  },
-};
+const SUMMARY_COLUMNS = [
+  { key: 'Total_Gen', header: 'Total Gen', width: 10 },
+  { key: 'Metas', header: 'Metas', width: 10 },
+  { key: 'Faltantes', header: 'Faltantes', width: 10 },
+];
 
 // ============================================================================
 // FUNCIÓN PRINCIPAL: generateCeaExcel
 // ============================================================================
-/**
- * Genera un archivo Excel CEA con formato profesional
- *
- * @param data - Array de objetos con datos del CEA (uno por microrregión)
- * @param options - Opciones de configuración
- * @returns Promise<Buffer> - Buffer del archivo Excel generado
- *
- * @example
- * const buffer = await generateCeaExcel(ceaData, {
- *   sheetName: 'CONCENTRADO',
- *   applyFormatting: true
- * });
- */
+
 export async function generateCeaExcel(
-  data: any[],
+  data: CeaRow[],
   options: ExcelWriterOptions = {}
 ): Promise<Buffer> {
-  try {
-    console.log('📝 Generando archivo Excel CEA...');
+  console.log('📝 Generando archivo Excel CEA...');
 
-    // 1. Configurar opciones por defecto
-    const {
-      sheetName = 'CONCENTRADO',
-      includeHeaders = true,
-      applyFormatting = true,
-      autoFitColumns = true,
-    } = options;
+  const {
+    sheetName = 'CONCENTRADO',
+    applyFormatting = true,
+  } = options;
 
-    // 2. Crear un nuevo Workbook
-    const workbook = new ExcelJS.Workbook();
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Sistema CEA CONAFE';
+  workbook.created = new Date();
 
-    // 3. Configurar propiedades del workbook
-    workbook.creator = 'Sistema CEA CONAFE';
-    workbook.created = new Date();
-    workbook.modified = new Date();
+  const ws = workbook.addWorksheet(sheetName, {
+    properties: { defaultRowHeight: 18 },
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
+  });
 
-    // 4. Crear la hoja de cálculo
-    const worksheet = workbook.addWorksheet(sheetName, {
-      properties: {
-        defaultRowHeight: 20,
-      },
-      pageSetup: {
-        orientation: 'landscape',  // Horizontal (muchas columnas)
-        fitToPage: true,
-        fitToWidth: 1,
-      },
-    });
+  // ---- Calcular estructura de columnas ----
+  // Col 1: Microrregión, Col 2: ECA, Col 3: Coord
+  // Cols 4-5: Inicial M/F, Cols 6-7: Preescolar M/F, ...
+  // Cols N-N+1: Total x Gén M/F, Col N+2: Total Gen, Col N+3: Metas, Col N+4: Faltantes
 
-    // 5. Definir estructura de columnas
-    const columns = [
-      { key: 'Microregion', header: 'Microrregión', width: 25 },
-      { key: 'Educador Comunitario de Acompañamiento', header: 'Educador Comunitario de Acompañamiento', width: 35 },
-      { key: 'Coordinador de Seguimiento', header: 'Coordinador de Seguimiento', width: 35 },
-      { key: 'Inicial_M', header: 'Inicial M', width: 12 },
-      { key: 'Inicial_F', header: 'Inicial F', width: 12 },
-      { key: 'Preescolar_M', header: 'Preescolar M', width: 12 },
-      { key: 'Preescolar_F', header: 'Preescolar F', width: 12 },
-      { key: 'CIC_M', header: 'CIC M', width: 12 },
-      { key: 'CIC_F', header: 'CIC F', width: 12 },
-      { key: 'PreeMig_M', header: 'PreeMig M', width: 12 },
-      { key: 'PreeMig_F', header: 'PreeMig F', width: 12 },
-      { key: 'Prim_M', header: 'Prim M', width: 12 },
-      { key: 'Prim_F', header: 'Prim F', width: 12 },
-      { key: 'Sec_M', header: 'Sec M', width: 12 },
-      { key: 'Sec_F', header: 'Sec F', width: 12 },
-      { key: 'Total_M', header: 'Total M', width: 12 },
-      { key: 'Total_F', header: 'Total F', width: 12 },
-      { key: 'Total_Gen', header: 'Total Gen', width: 12 },
-      { key: 'Metas', header: 'Metas', width: 12 },
-      { key: 'Faltantes', header: 'Faltantes', width: 12 },
-    ];
+  const totalFixedCols = FIXED_COLUMNS.length; // 3
+  const totalModalidadCols = MODALIDAD_COLUMNS.length * 2; // 12
+  const totalTotalCols = TOTAL_COLUMNS.length * 2; // 2
+  const totalSummaryCols = SUMMARY_COLUMNS.length; // 3
+  const totalCols = totalFixedCols + totalModalidadCols + totalTotalCols + totalSummaryCols; // 20
 
-    worksheet.columns = columns;
-
-    // 6. Agregar fila de headers si está habilitado
-    if (includeHeaders) {
-      const headerRow = worksheet.getRow(1);
-
-      // Aplicar estilo a cada celda del header
-      headerRow.eachCell((cell, colNumber) => {
-        cell.font = FONTS.header;
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: COLORS.headerBackground },
-        };
-        cell.alignment = {
-          vertical: 'middle',
-          horizontal: 'center',
-          wrapText: true,
-        };
-        cell.border = BORDERS.medium;
-      });
-
-      // Hacer el header más alto para que quepa el texto
-      headerRow.height = 30;
-    }
-
-    // 7. Agregar datos fila por fila
-    data.forEach((row, index) => {
-      const excelRow = worksheet.addRow(row);
-
-      // Aplicar formato a cada celda de datos
-      if (applyFormatting) {
-        excelRow.eachCell((cell, colNumber) => {
-          // Font por defecto
-          cell.font = FONTS.data;
-
-          // Alineación según el tipo de dato
-          const columnKey = columns[colNumber - 1]?.key;
-          if (columnKey && typeof row[columnKey] === 'number') {
-            // Números: centrado
-            cell.alignment = { vertical: 'middle', horizontal: 'center' };
-          } else {
-            // Texto: izquierda
-            cell.alignment = { vertical: 'middle', horizontal: 'left' };
-          }
-
-          // Bordes
-          cell.border = BORDERS.thin;
-
-          // Formato especial para columnas de totales
-          if (
-            columnKey === 'Total_M' ||
-            columnKey === 'Total_F' ||
-            columnKey === 'Total_Gen' ||
-            columnKey === 'Metas'
-          ) {
-            cell.font = FONTS.total;
-            cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: COLORS.totalBackground },
-            };
-          }
-
-          // Formato especial para faltantes negativos (rojo)
-          if (columnKey === 'Faltantes' && typeof cell.value === 'number' && cell.value < 0) {
-            cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: COLORS.negativeBackground },
-            };
-            cell.font = {
-              ...FONTS.total,
-              color: { argb: COLORS.negativeText },
-            };
-          }
-        });
-      }
-    });
-
-    // 8. Auto-ajustar anchos de columna si está habilitado
-    if (autoFitColumns) {
-      worksheet.columns.forEach((column) => {
-        if (column.width) {
-          // Ya tiene ancho predefinido, mantenerlo
-          return;
-        }
-
-        // Calcular ancho basado en el contenido
-        let maxLength = 0;
-        column.eachCell!({ includeEmpty: true }, (cell) => {
-          const cellValue = cell.value ? cell.value.toString() : '';
-          maxLength = Math.max(maxLength, cellValue.length);
-        });
-
-        // Establecer ancho (mínimo 10, máximo 50)
-        column.width = Math.min(Math.max(maxLength + 2, 10), 50);
-      });
-    }
-
-    // 9. Congelar la fila de headers
-    worksheet.views = [
-      {
-        state: 'frozen',
-        xSplit: 0,
-        ySplit: 1,  // Congelar primera fila (headers)
-        activeCell: 'A2',
-      },
-    ];
-
-    // 10. Agregar filtros automáticos a los headers
-    if (includeHeaders) {
-      worksheet.autoFilter = {
-        from: { row: 1, column: 1 },
-        to: { row: 1, column: columns.length },
-      };
-    }
-
-    // 11. Convertir el workbook a buffer
-    console.log('💾 Convirtiendo workbook a buffer...');
-    const buffer = await workbook.xlsx.writeBuffer();
-
-    console.log(`✅ Archivo Excel generado: ${data.length} filas, ${columns.length} columnas`);
-
-    return buffer as Buffer;
-  } catch (error) {
-    console.error('❌ Error generando Excel:', error);
-    throw new Error(`Error generando archivo Excel: ${error.message}`);
+  // ---- Fila 1: Título ----
+  const titleRow = ws.getRow(1);
+  titleRow.getCell(1).value = 'Total X Figura';
+  if (applyFormatting) {
+    titleRow.getCell(1).font = { name: 'Calibri', size: 14, bold: true, color: { argb: COLORS.titleText } };
+    titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.titleBg } };
+    titleRow.height = 28;
+    // Merge título
+    ws.mergeCells(1, 1, 1, totalCols);
+    titleRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'center' };
   }
+
+  // ---- Fila 2: Headers principales ----
+  const headerRow = ws.getRow(2);
+  headerRow.height = 36;
+
+  // Columnas fijas (Microrregión, ECA, Coord) - se mergean filas 2-3
+  let colIdx = 1;
+  for (const fc of FIXED_COLUMNS) {
+    ws.mergeCells(2, colIdx, 3, colIdx);
+    const cell = headerRow.getCell(colIdx);
+    cell.value = fc.header;
+    ws.getColumn(colIdx).width = fc.width;
+    colIdx++;
+  }
+
+  // Columnas de modalidad (M/F pares) - header abarca 2 columnas
+  for (const mc of MODALIDAD_COLUMNS) {
+    ws.mergeCells(2, colIdx, 2, colIdx + 1);
+    headerRow.getCell(colIdx).value = mc.name;
+    ws.getColumn(colIdx).width = 6;
+    ws.getColumn(colIdx + 1).width = 6;
+    colIdx += 2;
+  }
+
+  // Columna Total x Gén (M/F)
+  for (const tc of TOTAL_COLUMNS) {
+    ws.mergeCells(2, colIdx, 2, colIdx + 1);
+    headerRow.getCell(colIdx).value = tc.name;
+    ws.getColumn(colIdx).width = 7;
+    ws.getColumn(colIdx + 1).width = 7;
+    colIdx += 2;
+  }
+
+  // Columnas de resumen (Total Gen, Metas, Faltantes) - se mergean filas 2-3
+  for (const sc of SUMMARY_COLUMNS) {
+    ws.mergeCells(2, colIdx, 3, colIdx);
+    headerRow.getCell(colIdx).value = sc.header;
+    ws.getColumn(colIdx).width = sc.width;
+    colIdx++;
+  }
+
+  // ---- Fila 3: Sub-headers de género (M, F) ----
+  const subHeaderRow = ws.getRow(3);
+  subHeaderRow.height = 20;
+
+  colIdx = totalFixedCols + 1; // Empezar después de las columnas fijas
+  const allPairedGroups = [...MODALIDAD_COLUMNS, ...TOTAL_COLUMNS];
+  for (let i = 0; i < allPairedGroups.length; i++) {
+    subHeaderRow.getCell(colIdx).value = 'M';
+    subHeaderRow.getCell(colIdx + 1).value = 'F';
+    colIdx += 2;
+  }
+
+  // ---- Aplicar formato a headers ----
+  if (applyFormatting) {
+    for (let row = 2; row <= 3; row++) {
+      const r = ws.getRow(row);
+      for (let c = 1; c <= totalCols; c++) {
+        const cell = r.getCell(c);
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.headerText } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.headerBg } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = BORDER_MEDIUM;
+      }
+    }
+  }
+
+  // ---- Fila 4+: Datos ----
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const excelRow = ws.getRow(4 + i);
+    let c = 1;
+
+    // Columnas fijas
+    excelRow.getCell(c++).value = row.Microregion;
+    excelRow.getCell(c++).value = row.ECA;
+    excelRow.getCell(c++).value = row.CoordinadorSeguimiento;
+
+    // Modalidades M/F
+    for (const mc of MODALIDAD_COLUMNS) {
+      const valM = (row as any)[mc.keyM] || 0;
+      const valF = (row as any)[mc.keyF] || 0;
+      excelRow.getCell(c++).value = valM || '';
+      excelRow.getCell(c++).value = valF || '';
+    }
+
+    // Total x Gén M/F
+    excelRow.getCell(c++).value = row.Total_M;
+    excelRow.getCell(c++).value = row.Total_F;
+
+    // Resumen
+    excelRow.getCell(c++).value = row.Total_Gen;
+    excelRow.getCell(c++).value = row.Metas;
+    excelRow.getCell(c++).value = row.Faltantes;
+
+    // Formato de datos
+    if (applyFormatting) {
+      for (let col = 1; col <= totalCols; col++) {
+        const cell = excelRow.getCell(col);
+        cell.font = { name: 'Calibri', size: 10 };
+        cell.border = BORDER_THIN;
+
+        if (col <= 3) {
+          // Texto: alinear izquierda
+          cell.alignment = { vertical: 'middle', horizontal: 'left' };
+        } else {
+          // Números: centrar
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        }
+      }
+
+      // Resaltar columnas de totales
+      const totalMCol = totalFixedCols + totalModalidadCols + 1;
+      const totalFCol = totalMCol + 1;
+      const totalGenCol = totalFCol + 1;
+      const metasCol = totalGenCol + 1;
+      const faltantesCol = metasCol + 1;
+
+      for (const tc of [totalMCol, totalFCol, totalGenCol, metasCol]) {
+        excelRow.getCell(tc).font = { name: 'Calibri', size: 10, bold: true };
+        excelRow.getCell(tc).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.totalBg } };
+      }
+
+      // Faltantes negativos en rojo
+      const faltantesVal = excelRow.getCell(faltantesCol).value;
+      if (typeof faltantesVal === 'number' && faltantesVal < 0) {
+        excelRow.getCell(faltantesCol).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.negativeBg } };
+        excelRow.getCell(faltantesCol).font = { name: 'Calibri', size: 10, bold: true, color: { argb: COLORS.negativeText } };
+      }
+    }
+  }
+
+  // ---- Congelar headers ----
+  ws.views = [{ state: 'frozen', xSplit: 3, ySplit: 3, activeCell: 'D4' }];
+
+  // ---- Filtros automáticos en la fila de sub-headers ----
+  ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: totalCols } };
+
+  // ---- Generar buffer ----
+  console.log('💾 Convirtiendo workbook a buffer...');
+  const buffer = await workbook.xlsx.writeBuffer();
+  console.log(`✅ Excel generado: ${data.length} filas, ${totalCols} columnas`);
+
+  return buffer as Buffer;
 }
 
 // ============================================================================
-// FUNCIÓN AUXILIAR: formatCeaFileName
+// FUNCIÓN: formatCeaFileName
 // ============================================================================
-/**
- * Genera el nombre del archivo CEA con formato estándar
- * Formato: CEA_DD_MM_YYYY.xlsx
- *
- * @param date - Fecha para el nombre del archivo (default: fecha actual)
- * @returns Nombre del archivo formateado
- *
- * @example
- * formatCeaFileName() // "CEA_06_02_2026.xlsx"
- * formatCeaFileName(new Date('2025-12-25')) // "CEA_25_12_2025.xlsx"
- */
+
 export function formatCeaFileName(date: Date = new Date()): string {
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
-
   return `CEA_${day}_${month}_${year}.xlsx`;
 }
 
 // ============================================================================
-// FUNCIÓN AUXILIAR: validateCeaData
+// FUNCIÓN: validateCeaData
 // ============================================================================
-/**
- * Valida que los datos del CEA tengan la estructura correcta
- *
- * @param data - Array de datos a validar
- * @returns true si es válido, lanza error si no
- */
-export function validateCeaData(data: any[]): boolean {
+
+export function validateCeaData(data: CeaRow[]): boolean {
   if (!Array.isArray(data) || data.length === 0) {
     throw new Error('Los datos del CEA están vacíos o no son un array');
   }
 
-  // Verificar que el primer objeto tenga las propiedades esperadas
-  const requiredKeys = [
-    'Microregion',
-    'Educador Comunitario de Acompañamiento',
-    'Coordinador de Seguimiento',
-    'Total_Gen',
-    'Metas',
-    'Faltantes',
-  ];
+  const first = data[0];
+  const required = ['Microregion', 'Total_Gen', 'Metas', 'Faltantes'];
+  const missing = required.filter((k) => !(k in first));
 
-  const firstRow = data[0];
-  const missingKeys = requiredKeys.filter((key) => !(key in firstRow));
-
-  if (missingKeys.length > 0) {
-    throw new Error(
-      `Datos del CEA incompletos. Faltan propiedades: ${missingKeys.join(', ')}`
-    );
+  if (missing.length > 0) {
+    throw new Error(`Datos del CEA incompletos. Faltan: ${missing.join(', ')}`);
   }
 
   return true;
 }
 
-console.log('📦 Excel Writer con ExcelJS cargado');
+console.log('📦 Excel Writer cargado');

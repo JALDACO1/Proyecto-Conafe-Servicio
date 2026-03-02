@@ -17,6 +17,10 @@ import { useAuthStore } from './store/authStore';
 // Componentes de autenticación
 import { LoginForm } from './components/auth/LoginForm';
 import { ProtectedRoute, AdminRoute, UserRoute } from './components/auth/ProtectedRoute';
+import { SessionTimeoutWarning } from './components/auth/SessionTimeoutWarning';
+
+// Hooks
+import { useSessionTimeout } from './hooks/useSessionTimeout';
 
 // Placeholder components (se implementarán después)
 import { AdminDashboard } from './pages/AdminDashboard';
@@ -31,6 +35,7 @@ import { UserDashboard } from './pages/UserDashboard';
  */
 function App() {
   const { initialize, isLoading } = useAuthStore();
+  const { showWarning, minutesRemaining, extendSession } = useSessionTimeout();
 
   // ============================================================================
   // Inicialización
@@ -88,6 +93,13 @@ function App() {
   // ============================================================================
   return (
     <BrowserRouter>
+      {/* Modal de advertencia de sesión por expirar */}
+      <SessionTimeoutWarning
+        open={showWarning}
+        minutesRemaining={minutesRemaining}
+        onExtend={extendSession}
+      />
+
       <Routes>
         {/* ====================================================================
             Ruta Pública: Login

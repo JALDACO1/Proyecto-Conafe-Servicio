@@ -18,8 +18,9 @@ import {
   getLatestCea,
   getCeaById,
   processCeaBatch,
+  deleteCeaFile,
 } from '../utils/supabase/database';
-import { downloadFile, getSignedUrl } from '../utils/supabase/storage';
+import { downloadFile, getSignedUrl, deleteFile } from '../utils/supabase/storage';
 
 // ============================================================================
 // Tipos
@@ -51,6 +52,7 @@ interface CeaFilesState {
   fetchLatest: () => Promise<void>;
   generateCea: (batchId: string) => Promise<void>;
   downloadCea: (ceaId: string) => Promise<void>;
+  deleteCea: (ceaId: string) => Promise<void>;
   clearError: () => void;
 
   // Helpers
@@ -306,6 +308,55 @@ export const useCeaStore = create<CeaFilesState>((set, get) => ({
       set({ error: errorMessage });
 
       console.error('❌ Error en downloadCea:', errorMessage);
+      throw new Error(errorMessage);
+    }
+  },
+
+  // ============================================================================
+  // Acción: deleteCea
+  // ============================================================================
+  /**
+   * Elimina un archivo CEA (Storage + BD)
+   *
+   * @param ceaId - ID del archivo CEA en la BD
+   */
+  deleteCea: async (ceaId: string) => {
+    try {
+      set({ error: null });
+
+      // 1. Obtener información del archivo desde la BD
+      const { success, data: ceaFile, error } = await getCeaById(ceaId);
+
+      if (!success || !ceaFile) {
+        throw new Error(error || 'Archivo CEA no encontrado');
+      }
+
+      console.log(`🗑️ Eliminando CEA: ${ceaFile.file_name}`);
+
+      // 2. Eliminar de Storage
+      const storageResult = await deleteFile('cea-files', ceaFile.file_path);
+
+      if (!storageResult.success) {
+        console.warn('⚠️ No se pudo eliminar de Storage:', storageResult.error);
+      }
+
+      // 3. Eliminar de la base de datos
+      const dbResult = await deleteCeaFile(ceaId);
+
+      if (!dbResult.success) {
+        throw new Error(dbResult.error || 'Error eliminando archivo CEA');
+      }
+
+      // 4. Refrescar lista de archivos
+      await Promise.all([get().fetchFiles(), get().fetchLatest()]);
+
+      console.log(`✅ Archivo CEA eliminado: ${ceaFile.file_name}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
+
+      set({ error: errorMessage });
+
+      console.error('❌ Error en deleteCea:', errorMessage);
       throw new Error(errorMessage);
     }
   },
