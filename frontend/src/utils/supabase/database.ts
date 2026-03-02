@@ -743,9 +743,27 @@ export async function processCeaBatch(
 
     if (error) {
       console.error('❌ Error llamando process-cea:', error);
+
+      // Extraer el error real del cuerpo de la respuesta
+      let actualError = error.message;
+      try {
+        const body = await (error as any).context?.json?.();
+        // corsErrorResponse retorna { error: "...", details: { message: "..." } }
+        if (body?.details?.message) actualError = body.details.message;
+        else if (body?.error) actualError = body.error;
+        else if (body?.message) actualError = body.message;
+        console.error('❌ HTTP status:', (error as any).context?.status);
+      console.error('❌ Respuesta completa del error:', JSON.stringify(body));
+      } catch {
+        try {
+          const text = await (error as any).context?.text?.();
+          if (text) actualError = text;
+        } catch { /* ignorar */ }
+      }
+
       return {
         success: false,
-        error: error.message,
+        error: actualError,
       };
     }
 
@@ -794,9 +812,18 @@ export async function triggerValidation(
 
     if (error) {
       console.error('❌ Error llamando validate-master:', error);
+
+      let actualError = error.message;
+      try {
+        const body = await (error as any).context?.json?.();
+        if (body?.error) actualError = body.error;
+        else if (body?.message) actualError = body.message;
+        console.error('❌ Detalle del error:', body);
+      } catch { /* ignorar */ }
+
       return {
         success: false,
-        error: error.message,
+        error: actualError,
       };
     }
 
