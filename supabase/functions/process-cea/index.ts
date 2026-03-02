@@ -97,22 +97,23 @@ serve(async (req: Request) => {
     // 5. Obtener el cliente de Supabase con privilegios de servicio
     const supabase = getSupabaseServiceClient(req);
 
-    // 6. Obtener los 4 archivos Master del batch
+    // 6. Obtener los 4 archivos Master del batch (validados o subidos)
     const { data: masterFiles, error: fetchError } = await supabase
       .from('master_uploads')
       .select('*')
       .eq('upload_batch_id', batchId)
-      .eq('status', 'validated');
+      .in('status', ['validated', 'uploaded']);
 
     if (fetchError || !masterFiles) {
       console.error('❌ Error obteniendo Masters:', fetchError);
       return corsErrorResponse('Error obteniendo archivos Master', 500);
     }
 
-    // 7. Verificar que haya exactamente 4 Masters validados
-    if (masterFiles.length !== 4) {
+    // 7. Verificar que haya exactamente 4 Masters (uno por tipo)
+    const uniqueTypes = new Set(masterFiles.map((f) => f.file_type));
+    if (uniqueTypes.size !== 4) {
       return corsErrorResponse(
-        `Se requieren exactamente 4 archivos Master validados. Encontrados: ${masterFiles.length}`,
+        `Se requieren 4 archivos Master (uno por tipo). Encontrados: ${uniqueTypes.size} tipos de ${masterFiles.length} archivos`,
         400
       );
     }
