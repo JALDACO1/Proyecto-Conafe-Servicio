@@ -17,6 +17,13 @@ import type {
   MasterUploadStatus,
   CeaProcessingStatus,
 } from '../../types/database.types';
+import {
+  processMasterAlumnos,
+  processMasterServicios,
+  processMasterFiguras,
+  generarCEA,
+} from '../ceaProcessor';
+import { generateCeaExcel, formatCeaFileName } from '../ceaExcelWriter';
 
 // ============================================================================
 // Tipos para resultados de operaciones
@@ -723,70 +730,148 @@ export function generateBatchId(): string {
 // ============================================================================
 
 /**
- * Dispara el procesamiento de un batch de Masters para generar CEA
- * Llama a la Edge Function process-cea
+ * Procesa un batch de Masters y genera el CEA directamente en el navegador.
+ * Evita los límites de CPU de las Supabase Edge Functions usando SheetJS en el browser.
  *
- * @param batchId - ID del batch de Masters validados
+ * @param batchId - ID del batch de Masters a procesar
  * @returns Promise<DatabaseResult> con información del CEA generado
- *
- * @example
- * const result = await processCeaBatch('batch-123');
  */
 export async function processCeaBatch(
   batchId: string
 ): Promise<DatabaseResult<{ ceaId: string; fileName: string; filePath: string }>> {
+  const startTime = Date.now();
+
   try {
-    // Llamar a la Edge Function process-cea
-    const { data, error } = await supabase.functions.invoke('process-cea', {
-      body: { batchId },
-    });
+    console.log('🚀 Iniciando procesamiento CEA en el navegador...');
 
-    if (error) {
-      console.error('❌ Error llamando process-cea:', error);
-
-      // Extraer el error real del cuerpo de la respuesta
-      let actualError = error.message;
-      try {
-        const body = await (error as any).context?.json?.();
-        // corsErrorResponse retorna { error: "...", details: { message: "..." } }
-        if (body?.details?.message) actualError = body.details.message;
-        else if (body?.error) actualError = body.error;
-        else if (body?.message) actualError = body.message;
-        console.error('❌ HTTP status:', (error as any).context?.status);
-      console.error('❌ Respuesta completa del error:', JSON.stringify(body));
-      } catch {
-        try {
-          const text = await (error as any).context?.text?.();
-          if (text) actualError = text;
-        } catch { /* ignorar */ }
-      }
-
-      return {
-        success: false,
-        error: actualError,
-      };
+    // 1. Obtener el usuario autenticado
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return { success: false, error: 'No autenticado' };
     }
 
-    if (!data?.success) {
-      return {
-        success: false,
-        error: data?.message || 'Error procesando CEA',
-      };
+    // 2. Obtener los archivos Master del batch
+    const { data: masterFiles, error: fetchError } = await supabase
+      .from('master_uploads')
+      .select('*')
+      .eq('upload_batch_id', batchId)
+      .in('status', ['validated', 'uploaded']);
+
+    if (fetchError || !masterFiles || masterFiles.length === 0) {
+      return { success: false, error: 'No se encontraron archivos Master para este batch' };
     }
+
+    const requiredTypes = ['alumnos', 'servicios', 'figuras', 'telefonia'];
+    const fileTypes = masterFiles.map((f: MasterUpload) => f.file_type);
+    const missingTypes = requiredTypes.filter((t) => !fileTypes.includes(t as MasterFileType));
+
+    if (missingTypes.length > 0) {
+      return { success: false, error: `Faltan archivos Master de tipo: ${missingTypes.join(', ')}` };
+    }
+
+    const masterAlumnos = masterFiles.find((f: MasterUpload) => f.file_type === 'alumnos')!;
+    const masterServicios = masterFiles.find((f: MasterUpload) => f.file_type === 'servicios')!;
+    const masterFiguras = masterFiles.find((f: MasterUpload) => f.file_type === 'figuras')!;
+
+    // 3. Descargar los archivos desde Storage
+    console.log('📥 Descargando archivos Master...');
+
+    const downloadFile = async (filePath: string): Promise<ArrayBuffer> => {
+      const { data: blob, error } = await supabase.storage
+        .from('master-files')
+        .download(filePath);
+      if (error || !blob) throw new Error(`Error descargando ${filePath}: ${error?.message}`);
+      return blob.arrayBuffer();
+    };
+
+    const [alumnosBuffer, serviciosBuffer, figurasBuffer] = await Promise.all([
+      downloadFile(masterAlumnos.file_path),
+      downloadFile(masterServicios.file_path),
+      downloadFile(masterFiguras.file_path),
+    ]);
+
+    // 4. Procesar los archivos
+    console.log('📊 Procesando archivos Master...');
+
+    const [alumnosData, serviciosData, figurasData] = await Promise.all([
+      processMasterAlumnos(alumnosBuffer),
+      processMasterServicios(serviciosBuffer),
+      processMasterFiguras(figurasBuffer),
+    ]);
+
+    // 5. Generar el CONCENTRADO CEA
+    console.log('🔄 Generando CONCENTRADO CEA...');
+    const ceaData = generarCEA(alumnosData, serviciosData, figurasData);
+
+    if (!ceaData || ceaData.length === 0) {
+      return { success: false, error: 'El CEA generado está vacío. Verifica los archivos Master.' };
+    }
+
+    // 6. Generar el archivo Excel
+    console.log('📝 Generando archivo Excel...');
+    const ceaFileName = formatCeaFileName();
+    const excelBuffer = generateCeaExcel(ceaData);
+
+    // 7. Subir el archivo CEA a Storage
+    const ceaFilePath = `${crypto.randomUUID()}_${ceaFileName}`;
+    console.log(`📤 Subiendo CEA: ${ceaFilePath}`);
+
+    const { error: uploadError } = await supabase.storage
+      .from('cea-files')
+      .upload(ceaFilePath, excelBuffer, {
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        upsert: false,
+      });
+
+    if (uploadError) {
+      return { success: false, error: `Error subiendo CEA: ${uploadError.message}` };
+    }
+
+    // 8. Crear registro en la base de datos
+    const processingTimeMs = Date.now() - startTime;
+
+    const { data: ceaRecord, error: insertError } = await supabase
+      .from('cea_files')
+      .insert({
+        file_name: ceaFileName,
+        file_path: ceaFilePath,
+        file_size: excelBuffer.byteLength,
+        generated_from_batch: batchId,
+        processed_by: user.id,
+        processing_status: 'completed' as CeaProcessingStatus,
+        total_records: ceaData.length,
+        processing_time_ms: processingTimeMs,
+        is_latest: true,
+      })
+      .select()
+      .single();
+
+    if (insertError || !ceaRecord) {
+      return { success: false, error: `Error registrando CEA: ${insertError?.message}` };
+    }
+
+    // 9. Marcar CEAs anteriores como no-latest
+    await supabase
+      .from('cea_files')
+      .update({ is_latest: false })
+      .neq('id', ceaRecord.id)
+      .eq('is_latest', true);
+
+    console.log(`✅ CEA generado en el navegador: ${ceaFileName} (${processingTimeMs}ms)`);
 
     return {
       success: true,
       data: {
-        ceaId: data.data.ceaId,
-        fileName: data.data.fileName,
-        filePath: data.data.filePath,
+        ceaId: ceaRecord.id,
+        fileName: ceaFileName,
+        filePath: ceaFilePath,
       },
     };
   } catch (error) {
-    console.error('❌ Error en processCeaBatch:', error);
+    console.error('❌ Error en processCeaBatch (browser):', error);
     return {
       success: false,
-      error: 'Error inesperado al procesar CEA',
+      error: error instanceof Error ? error.message : 'Error inesperado al procesar CEA',
     };
   }
 }
