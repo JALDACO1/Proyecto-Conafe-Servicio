@@ -26,7 +26,7 @@ const WARNING_BEFORE_MS = 2 * 60 * 1000;
 const CHECK_INTERVAL_MS = 15 * 1000;
 
 /** Key de localStorage para sincronizar actividad entre pestañas */
-const LAST_ACTIVITY_KEY = 'cea_last_activity';
+export const LAST_ACTIVITY_KEY = 'cea_last_activity';
 
 // ============================================================================
 // Hook

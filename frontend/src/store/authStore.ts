@@ -26,6 +26,7 @@ import {
   getUserProfile,
   onAuthStateChange,
 } from '../utils/supabase/auth';
+import { LAST_ACTIVITY_KEY } from '../hooks/useSessionTimeout';
 
 // ============================================================================
 // Tipos
@@ -111,7 +112,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         throw new Error('Error obteniendo datos de usuario');
       }
 
-      // 3. Actualizar estado
+      // 3. Marcar actividad ahora para que el hook de sesión no expire inmediatamente
+      localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
+
+      // 4. Actualizar estado
       set({
         user: userResult.data,
         profile: result.profile,
@@ -157,7 +161,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         throw new Error('Error al cerrar sesión');
       }
 
-      // 2. Limpiar estado
+      // 2. Limpiar timestamp de actividad y estado
+      localStorage.removeItem(LAST_ACTIVITY_KEY);
       set({
         user: null,
         profile: null,
