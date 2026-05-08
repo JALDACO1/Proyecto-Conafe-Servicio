@@ -50,7 +50,7 @@ interface CeaFilesState {
   // Acciones
   fetchFiles: () => Promise<void>;
   fetchLatest: () => Promise<void>;
-  generateCea: (batchId: string) => Promise<void>;
+  generateCea: (cicloEscolar: string, batchId?: string) => Promise<void>;
   downloadCea: (ceaId: string) => Promise<void>;
   deleteCea: (ceaId: string) => Promise<void>;
   clearError: () => void;
@@ -187,7 +187,7 @@ export const useCeaStore = create<CeaFilesState>((set, get) => ({
    * @example
    * await generateCea('batch-123');
    */
-  generateCea: async (batchId: string) => {
+  generateCea: async (cicloEscolar: string, batchId?: string) => {
     try {
       // 1. Inicializar estado de procesamiento
       set({
@@ -199,19 +199,19 @@ export const useCeaStore = create<CeaFilesState>((set, get) => ({
         error: null,
       });
 
-      console.log(`🚀 Iniciando generación de CEA para batch: ${batchId}`);
+      console.log(`🚀 Iniciando generación de CEA para ciclo: ${cicloEscolar}`);
 
-      // 2. Actualizar progreso: descargando Masters
+      // 2. Actualizar progreso
       set({
         processingStatus: {
           isProcessing: true,
           progress: 20,
-          message: 'Descargando archivos Master...',
+          message: 'Procesando datos…',
         },
       });
 
-      // 3. Llamar a Edge Function para procesar
-      const result = await processCeaBatch(batchId);
+      // 3. Llamar a la edge function process-cea (BD-driven)
+      const result = await processCeaBatch(cicloEscolar, batchId);
 
       if (!result.success || !result.data) {
         throw new Error(result.error || 'Error procesando CEA');

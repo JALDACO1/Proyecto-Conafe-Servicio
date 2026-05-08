@@ -10,8 +10,8 @@
  * - Paleta de colores CONAFE oficial
  */
 
-import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 
 // ============================================================================
@@ -32,10 +32,22 @@ export function LoginForm() {
   const [localError, setLocalError] = useState<string | null>(null);
 
   // Estado global de autenticación
-  const { login, isAdmin, error: globalError } = useAuthStore();
+  const { login, isAdmin, isAuthenticated, error: globalError } = useAuthStore();
 
   // Navegación
   const navigate = useNavigate();
+
+  // Guard: si el estado dice autenticado (p.ej. el listener onAuthStateChange
+  // ya actualizó el store antes de que navigate corra), redirigir.
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(isAdmin() ? '/admin' : '/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, isAdmin, navigate]);
+
+  if (isAuthenticated) {
+    return <Navigate to={isAdmin() ? '/admin' : '/dashboard'} replace />;
+  }
 
   // ============================================================================
   // Manejador de submit

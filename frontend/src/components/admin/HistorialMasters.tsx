@@ -60,20 +60,20 @@ const FILE_TYPE_LABELS: Record<MasterFileType, string> = {
   alumnos: 'Alumnos',
   servicios: 'Servicios',
   figuras: 'Figuras',
-  telefonia: 'Telefonía',
 };
 
 const FILE_TYPE_COLORS: Record<MasterFileType, string> = {
   alumnos: 'bg-conafe-guinda/10 text-conafe-guinda border-conafe-guinda/20',
   servicios: 'bg-conafe-verde/10 text-conafe-verde border-conafe-verde/20',
   figuras: 'bg-conafe-azul/10 text-conafe-azul border-conafe-azul/20',
-  telefonia: 'bg-conafe-ambar/10 text-amber-700 border-conafe-ambar/20',
 };
 
 const STATUS_CONFIG: Record<string, { label: string; variant: 'default' | 'success' | 'destructive' | 'secondary' }> = {
   uploaded: { label: 'Subido', variant: 'secondary' },
   validating: { label: 'Validando...', variant: 'default' },
   validated: { label: 'Validado', variant: 'success' },
+  ingesting: { label: 'Ingiriendo...', variant: 'default' },
+  ingested: { label: 'Ingerido', variant: 'success' },
   error: { label: 'Error', variant: 'destructive' },
 };
 

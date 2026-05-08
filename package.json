@@ -1,0 +1,25 @@
+{
+  "name": "proyecto-conafe-servicio",
+  "version": "1.0.0",
+  "description": "Proyecto del Consejo Nacional de Fomento Educativo (CONAFE).",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JALDACO1/Proyecto-Conafe-Servicio.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/JALDACO1/Proyecto-Conafe-Servicio/issues"
+  },
+  "homepage": "https://github.com/JALDACO1/Proyecto-Conafe-Servicio#readme",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.103.3",
+    "exceljs": "^4.4.0"
+  }
+}

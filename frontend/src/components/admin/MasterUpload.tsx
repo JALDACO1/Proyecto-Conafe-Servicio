@@ -28,6 +28,7 @@ import {
 import { useCeaStore } from '@/store/ceaStore';
 import { Spinner } from '@/components/ui/spinner';
 import { useMasterUploadsRealtime } from '@/hooks/useRealtime';
+import { supabase } from '@/utils/supabase/client';
 import type { MasterFileType } from '@/types/database.types';
 
 // ============================================================================
@@ -38,10 +39,9 @@ import type { MasterFileType } from '@/types/database.types';
  * Tipos de archivos Master requeridos
  */
 const MASTER_FILE_TYPES: MasterFileType[] = [
-  'alumnos',
   'servicios',
   'figuras',
-  'telefonia',
+  'alumnos',
 ];
 
 // ============================================================================
@@ -60,6 +60,8 @@ export const MasterUpload: React.FC = () => {
     getFileByType,
     deleteFile,
     currentBatchId,
+    cicloEscolar,
+    setCicloEscolar,
     createNewBatch,
     fetchFiles,
     error: storeError,
@@ -74,17 +76,36 @@ export const MasterUpload: React.FC = () => {
   const { generateCea, processingStatus } = useCeaStore();
 
   // ============================================================================
-  // Derivar canProcess del estado local de archivos
+  // Derivar canProcess del estado real de la BD
   // ============================================================================
-  const canProcess = React.useMemo(() => {
-    const batchFiles = files.filter(
-      (f) =>
-        f.upload_batch_id === currentBatchId &&
-        (f.status === 'validated' || f.status === 'uploaded')
-    );
-    const uniqueTypes = new Set(batchFiles.map((f) => f.file_type));
-    return uniqueTypes.size === 4;
-  }, [files, currentBatchId]);
+  // El CEA se genera a partir de los datos en la BD, no de los archivos. El
+  // botón se habilita siempre que existan CCT activos para el ciclo, sin
+  // importar si los Masters fueron subidos en esta sesión o ya estaban
+  // cargados desde antes. Subir los Masters sólo sirve para actualizar la BD.
+  const [hasDataInDb, setHasDataInDb] = React.useState(false);
+  const [dbCounts, setDbCounts] = React.useState<{ ccts: number; figuras: number; alumnos: number }>({
+    ccts: 0, figuras: 0, alumnos: 0,
+  });
+
+  const refreshDbCounts = React.useCallback(async () => {
+    const [{ count: cctsCount }, { count: figurasCount }, { count: alumnosCount }] = await Promise.all([
+      supabase.from('ccts').select('cct', { count: 'exact', head: true }).eq('activo', true),
+      supabase.from('figuras').select('numero_control', { count: 'exact', head: true }).eq('ciclo_escolar', cicloEscolar),
+      supabase.from('alumnos').select('id_alumno', { count: 'exact', head: true })
+        .eq('ciclo_escolar', cicloEscolar).is('baja', null),
+    ]);
+    const ccts = cctsCount ?? 0;
+    const figuras = figurasCount ?? 0;
+    const alumnos = alumnosCount ?? 0;
+    setDbCounts({ ccts, figuras, alumnos });
+    setHasDataInDb(ccts > 0);
+  }, [cicloEscolar]);
+
+  React.useEffect(() => {
+    refreshDbCounts().catch((err) => console.error('refreshDbCounts:', err));
+  }, [refreshDbCounts, files]);
+
+  const canProcess = hasDataInDb;
 
   // ============================================================================
   // Realtime: escuchar cambios de status en master_uploads
@@ -102,13 +123,14 @@ export const MasterUpload: React.FC = () => {
   });
 
   // ============================================================================
-  // Cargar archivos del batch al montar o cambiar de batch
+  // Cargar archivos al montar o cambiar de ciclo
   // ============================================================================
+  // Cargamos TODOS los archivos para que el botón "Generar CEA" se habilite
+  // aunque los Masters hayan sido ingeridos en sesiones anteriores. La nueva
+  // edge function process-cea trabaja por ciclo escolar, no por batch.
   React.useEffect(() => {
-    if (currentBatchId) {
-      fetchFiles(currentBatchId);
-    }
-  }, [currentBatchId, fetchFiles]);
+    fetchFiles();
+  }, [fetchFiles, cicloEscolar]);
 
   // ============================================================================
   // Manejadores
@@ -143,9 +165,10 @@ export const MasterUpload: React.FC = () => {
    * Maneja la generación de CEA
    */
   const handleGenerateCea = async () => {
-    if (!currentBatchId) return;
     try {
-      await generateCea(currentBatchId);
+      // generateCea acepta cicloEscolar (la nueva edge function lo requiere).
+      // El segundo argumento opcional es el currentBatchId para trazabilidad.
+      await generateCea(cicloEscolar, currentBatchId ?? undefined);
     } catch (err) {
       console.error('Error generando CEA:', err);
     }
@@ -170,10 +193,13 @@ export const MasterUpload: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">
-            Subir Archivos Master
+            Actualizar Base de Datos
           </h2>
           <p className="text-sm text-gray-600 mt-1">
-            Sube los 4 archivos Master requeridos para generar el CEA
+            Subir los 3 archivos Master (Servicios, Figuras, Alumnos) actualiza
+            la base de datos del ciclo seleccionado. <strong>No es obligatorio
+            subirlos</strong> para generar un CEA: si ya hay datos en la BD,
+            puedes generarlo directamente.
           </p>
         </div>
 
@@ -235,22 +261,10 @@ export const MasterUpload: React.FC = () => {
                     👥 Master de Figuras
                   </h4>
                   <p className="text-sm text-purple-800 mb-2">
-                    {/* El nombre debe contener: <span className="font-mono bg-purple-100 px-2 py-0.5 rounded">&quot;figura&quot;</span> o <span className="font-mono bg-purple-100 px-2 py-0.5 rounded">&quot;figuras&quot;</span> */}
+                    El nombre debe contener: <span className="font-mono bg-purple-100 px-2 py-0.5 rounded">&quot;figura&quot;</span> o <span className="font-mono bg-purple-100 px-2 py-0.5 rounded">&quot;figuras&quot;</span>
                   </p>
                   <p className="text-xs text-purple-700">
                     ✅ Ejemplos válidos: <span className="font-mono">Master_Figuras_Educativas.xlsx</span>, <span className="font-mono">figuras-2024.xlsx</span>
-                  </p>
-                </div>
-
-                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                  <h4 className="font-semibold text-orange-900 mb-2">
-                    📞 Master de Telefonía
-                  </h4>
-                  <p className="text-sm text-orange-800 mb-2">
-                    El nombre debe contener: <span className="font-mono bg-orange-100 px-2 py-0.5 rounded">&quot;telefon&quot;</span> o <span className="font-mono bg-orange-100 px-2 py-0.5 rounded">&quot;telefonia&quot;</span>
-                  </p>
-                  <p className="text-xs text-orange-700">
-                    ✅ Ejemplos válidos: <span className="font-mono">Master_Telefonia_2024.xlsx</span>, <span className="font-mono">telefonia.xlsx</span>
                   </p>
                 </div>
               </div>
@@ -293,9 +307,9 @@ export const MasterUpload: React.FC = () => {
         </Alert>
       )}
 
-      {/* Información del batch */}
+      {/* Información del batch + ciclo escolar */}
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <p className="text-sm font-medium text-gray-700">
               Batch ID actual
@@ -305,15 +319,34 @@ export const MasterUpload: React.FC = () => {
             </p>
           </div>
 
-          {/* Estado del batch */}
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="ciclo-escolar"
+              className="text-sm font-medium text-gray-700 whitespace-nowrap"
+            >
+              Ciclo escolar:
+            </label>
+            <input
+              id="ciclo-escolar"
+              type="text"
+              value={cicloEscolar}
+              onChange={(e) => setCicloEscolar(e.target.value)}
+              placeholder="2024-2025"
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono w-32 focus:outline-none focus:ring-2 focus:ring-conafe-verde"
+            />
+          </div>
+
+          {/* Estado de la BD para el ciclo */}
           <Badge variant={canProcess ? 'success' : 'secondary'}>
-            {canProcess ? '✓ Listo para procesar' : 'Pendiente'}
+            {canProcess
+              ? `✓ BD lista (${dbCounts.ccts} CCT)`
+              : 'Sin datos en BD'}
           </Badge>
         </div>
       </div>
 
       {/* Grid de zonas de upload */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {MASTER_FILE_TYPES.map((fileType) => {
           const existingFile = getFileByType(fileType);
           const progress = Array.from(uploadProgress.values()).find((p) => p.fileType === fileType);
@@ -333,11 +366,17 @@ export const MasterUpload: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     {/* Badge de estado */}
+                    {existingFile.status === 'ingested' && (
+                      <Badge variant="success">Ingerido</Badge>
+                    )}
                     {existingFile.status === 'validated' && (
                       <Badge variant="success">Validado</Badge>
                     )}
                     {existingFile.status === 'uploaded' && (
                       <Badge variant="secondary">Subido</Badge>
+                    )}
+                    {existingFile.status === 'ingesting' && (
+                      <Badge variant="default">Ingiriendo...</Badge>
                     )}
                     {existingFile.status === 'validating' && (
                       <Badge variant="default">Validando...</Badge>
@@ -387,8 +426,8 @@ export const MasterUpload: React.FC = () => {
             <h3 className="text-lg font-semibold text-gray-900">Generar CEA</h3>
             <p className="text-sm text-gray-600 mt-1">
               {canProcess
-                ? 'Los 4 Masters están validados. Puedes generar el CEA.'
-                : 'Sube y valida los 4 archivos Master para habilitar la generación.'}
+                ? `Datos disponibles para el ciclo ${cicloEscolar}: ${dbCounts.ccts} CCT activos, ${dbCounts.figuras} figuras, ${dbCounts.alumnos} alumnos.`
+                : `No hay datos en la base de datos para el ciclo ${cicloEscolar}. Sube los Masters para cargarlos.`}
             </p>
           </div>
           <Button
@@ -434,9 +473,10 @@ export const MasterUpload: React.FC = () => {
         <AlertTitle>📌 Instrucciones</AlertTitle>
         <AlertDescription>
           <ol className="list-decimal list-inside space-y-1 text-sm">
-            <li>Sube los 4 archivos Master (uno de cada tipo)</li>
-            <li>Espera a que se validen automáticamente (marca verde ✓)</li>
-            <li>Una vez validados los 4, presiona <strong>Generar CEA</strong></li>
+            <li>Verifica el <strong>ciclo escolar</strong> antes de operar.</li>
+            <li>Si quieres actualizar la base de datos, sube los Masters (Servicios, Figuras, Alumnos). Cada uno se ingiere automáticamente.</li>
+            <li>Para generar el CEA basta con que la BD tenga datos del ciclo: presiona <strong>Generar CEA</strong> cuando estés listo.</li>
+            <li>Subir Masters es opcional: si la BD ya tiene datos cargados antes, puedes generar el CEA sin volver a subir nada.</li>
           </ol>
         </AlertDescription>
       </Alert>

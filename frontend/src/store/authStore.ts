@@ -95,8 +95,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
    * await login('admin@conafe.gob.mx', 'password123');
    */
   login: async (email: string, password: string) => {
+    // Importante: NO tocar isLoading aquí. App.tsx muestra el splash global
+    // cuando isLoading=true y desmontaría el LoginForm a mitad del await,
+    // impidiendo que se ejecute navigate() al terminar. El botón de submit
+    // ya gestiona su propio estado de carga local (isSubmitting).
     try {
-      set({ isLoading: true, error: null });
+      set({ error: null });
 
       // 1. Iniciar sesión con Supabase Auth
       const result = await signIn({ email, password });
@@ -112,7 +116,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         throw new Error('Error obteniendo datos de usuario');
       }
 
-      // 3. Marcar actividad ahora para que el hook de sesión no expire inmediatamente
+      // 3. Marcar actividad para que el hook de sesión no expire inmediatamente
       localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
 
       // 4. Actualizar estado
@@ -120,7 +124,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user: userResult.data,
         profile: result.profile,
         isAuthenticated: true,
-        isLoading: false,
         error: null,
       });
 
@@ -132,7 +135,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user: null,
         profile: null,
         isAuthenticated: false,
-        isLoading: false,
         error: errorMessage,
       });
 
@@ -151,8 +153,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
    * await logout();
    */
   logout: async () => {
+    // Mismo motivo que en login: no tocar isLoading. App.tsx muestra splash
+    // global cuando isLoading=true; durante logout queremos que el usuario
+    // sea redirigido por ProtectedRoute, no que se quede con la pantalla
+    // de "Cargando aplicación...".
     try {
-      set({ isLoading: true, error: null });
+      set({ error: null });
 
       // 1. Cerrar sesión en Supabase
       const { success } = await signOut();
@@ -167,7 +173,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user: null,
         profile: null,
         isAuthenticated: false,
-        isLoading: false,
         error: null,
       });
 
@@ -175,10 +180,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Error desconocido';
 
-      set({
-        isLoading: false,
-        error: errorMessage,
-      });
+      set({ error: errorMessage });
 
       console.error('❌ Error en logout:', errorMessage);
       throw new Error(errorMessage);

@@ -315,7 +315,7 @@ export async function deleteMasterUpload(
 }
 
 /**
- * Verifica si hay 4 Masters validados en un batch
+ * Verifica si hay 3 Masters ingeridos en un batch
  * (requisito para poder generar un CEA)
  *
  * @param batchId - ID del batch a verificar
@@ -335,7 +335,7 @@ export async function checkBatchComplete(
       .from('master_uploads')
       .select('file_type')
       .eq('upload_batch_id', batchId)
-      .eq('status', 'validated');
+      .in('status', ['ingested', 'validated']);
 
     if (error) {
       console.error('❌ Error verificando batch:', error);
@@ -345,12 +345,9 @@ export async function checkBatchComplete(
       };
     }
 
-    // Extraer tipos de archivos
     const types = data.map((item) => item.file_type);
-
-    // Verificar que haya exactamente 4 Masters de tipos diferentes
     const uniqueTypes = new Set(types);
-    const isComplete = uniqueTypes.size === 4;
+    const isComplete = uniqueTypes.size === 3;
 
     return {
       success: true,
@@ -730,14 +727,62 @@ export function generateBatchId(): string {
 // ============================================================================
 
 /**
- * Procesa un batch de Masters y genera el CEA directamente en el navegador.
- * Evita los límites de CPU de las Supabase Edge Functions usando SheetJS en el browser.
+ * Genera un CEA llamando a la edge function `process-cea` (BD-driven).
  *
- * @param batchId - ID del batch de Masters a procesar
+ * @param cicloEscolar - Ciclo escolar a procesar (ej. "25-26").
+ * @param batchId - (Opcional) batch desde el que se disparó, sólo para trazabilidad.
  * @returns Promise<DatabaseResult> con información del CEA generado
  */
 export async function processCeaBatch(
-  batchId: string
+  cicloEscolar: string,
+  batchId?: string,
+): Promise<DatabaseResult<{ ceaId: string; fileName: string; filePath: string }>> {
+  try {
+    console.log(`🚀 Llamando edge function process-cea (ciclo=${cicloEscolar})…`);
+
+    const { data, error } = await supabase.functions.invoke('process-cea', {
+      body: { ciclo_escolar: cicloEscolar, batch_id: batchId ?? null },
+    });
+
+    if (error) {
+      console.error('❌ Error invocando process-cea:', error);
+      let actualError = error.message;
+      try {
+        const body = await (error as any).context?.json?.();
+        if (body?.error) actualError = body.error;
+        else if (body?.message) actualError = body.message;
+      } catch { /* noop */ }
+      return { success: false, error: actualError };
+    }
+
+    if (!data?.success || !data?.data) {
+      return { success: false, error: data?.error || data?.message || 'Edge function devolvió error' };
+    }
+
+    return {
+      success: true,
+      data: {
+        ceaId: data.data.ceaId,
+        fileName: data.data.fileName,
+        filePath: data.data.filePath,
+      },
+    };
+  } catch (e) {
+    console.error('❌ Error inesperado en processCeaBatch:', e);
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : 'Error inesperado al procesar CEA',
+    };
+  }
+}
+
+/**
+ * @deprecated Procesador en el navegador (SheetJS). Conservado temporalmente por
+ * si la edge function no estuviera disponible; el flujo actual usa
+ * `processCeaBatch(cicloEscolar)` que invoca la edge function.
+ */
+async function _legacyProcessCeaInBrowser(
+  batchId: string,
 ): Promise<DatabaseResult<{ ceaId: string; fileName: string; filePath: string }>> {
   const startTime = Date.now();
 
@@ -755,15 +800,15 @@ export async function processCeaBatch(
       .from('master_uploads')
       .select('*')
       .eq('upload_batch_id', batchId)
-      .in('status', ['validated', 'uploaded']);
+      .in('status', ['ingested', 'validated', 'uploaded']);
 
     if (fetchError || !masterFiles || masterFiles.length === 0) {
       return { success: false, error: 'No se encontraron archivos Master para este batch' };
     }
 
-    const requiredTypes = ['alumnos', 'servicios', 'figuras', 'telefonia'];
+    const requiredTypes: MasterFileType[] = ['alumnos', 'servicios', 'figuras'];
     const fileTypes = masterFiles.map((f: MasterUpload) => f.file_type);
-    const missingTypes = requiredTypes.filter((t) => !fileTypes.includes(t as MasterFileType));
+    const missingTypes = requiredTypes.filter((t) => !fileTypes.includes(t));
 
     if (missingTypes.length > 0) {
       return { success: false, error: `Faltan archivos Master de tipo: ${missingTypes.join(', ')}` };
@@ -877,26 +922,33 @@ export async function processCeaBatch(
 }
 
 /**
- * Dispara la validación de un archivo Master
- * Llama a la Edge Function validate-master
+ * Dispara la ingesta relacional de un archivo Master
+ * Llama a la Edge Function ingest-master, que valida el archivo y persiste
+ * sus filas en las tablas relacionales definidas por el esquema.
  *
- * @param masterId - ID del archivo Master a validar
- * @returns Promise<DatabaseResult> con resultado de validación
+ * @param masterId - ID del archivo Master a ingerir
+ * @param cicloEscolar - Ciclo escolar al que pertenece (ej: "2024-2025")
+ * @returns Promise<DatabaseResult> con las estadísticas por tabla
  *
  * @example
- * const result = await triggerValidation('master-123');
+ * const result = await triggerIngest('master-123', '2024-2025');
  */
-export async function triggerValidation(
-  masterId: string
-): Promise<DatabaseResult<{ recordCount?: number; warnings?: string[] }>> {
+export async function triggerIngest(
+  masterId: string,
+  cicloEscolar: string
+): Promise<DatabaseResult<{
+  ingestBatchId: string;
+  cicloEscolar: string;
+  totalRows: number;
+  stats: Record<string, number>;
+}>> {
   try {
-    // Llamar a la Edge Function validate-master
-    const { data, error } = await supabase.functions.invoke('validate-master', {
-      body: { masterId },
+    const { data, error } = await supabase.functions.invoke('ingest-master', {
+      body: { masterId, cicloEscolar },
     });
 
     if (error) {
-      console.error('❌ Error llamando validate-master:', error);
+      console.error('❌ Error llamando ingest-master:', error);
 
       let actualError = error.message;
       try {
@@ -915,22 +967,24 @@ export async function triggerValidation(
     if (!data?.success) {
       return {
         success: false,
-        error: data?.message || 'Error validando Master',
+        error: data?.message || data?.error || 'Error ingiriendo Master',
       };
     }
 
     return {
       success: true,
       data: {
-        recordCount: data.data?.recordCount,
-        warnings: data.data?.warnings,
+        ingestBatchId: data.data?.ingestBatchId,
+        cicloEscolar: data.data?.cicloEscolar,
+        totalRows: data.data?.totalRows ?? 0,
+        stats: data.data?.stats ?? {},
       },
     };
   } catch (error) {
-    console.error('❌ Error en triggerValidation:', error);
+    console.error('❌ Error en triggerIngest:', error);
     return {
       success: false,
-      error: 'Error inesperado al validar Master',
+      error: 'Error inesperado al ingerir Master',
     };
   }
 }
