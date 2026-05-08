@@ -53,6 +53,13 @@ test-results/
 .supabase/
 supabase/.temp/
 
+# ======== Supabase self-hosted (Docker) ========
+self-hosted/.env
+self-hosted/.env.old
+self-hosted/volumes/db/data/
+self-hosted/volumes/storage/
+self-hosted/volumes/logs/*.log
+
 # ======== Sistema operativo ========
 .DS_Store
 Thumbs.db

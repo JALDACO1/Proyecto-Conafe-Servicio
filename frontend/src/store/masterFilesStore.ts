@@ -24,7 +24,7 @@ import {
   insertMasterUpload,
   deleteMasterUpload,
   checkBatchComplete,
-  triggerValidation,
+  triggerIngest,
 } from '../utils/supabase/database';
 
 // ============================================================================
@@ -38,7 +38,7 @@ export interface UploadProgress {
   fileType: MasterFileType;
   fileName: string;
   progress: number;        // 0-100
-  status: 'uploading' | 'validating' | 'completed' | 'error';
+  status: 'uploading' | 'ingesting' | 'completed' | 'error';
   error?: string;
 }
 
@@ -49,6 +49,7 @@ interface MasterFilesState {
   // Estado actual
   files: MasterUpload[];                    // Lista de archivos Master
   currentBatchId: string | null;            // Batch ID actual
+  cicloEscolar: string;                     // Ciclo escolar activo (ej: "2024-2025")
   uploadProgress: Map<string, UploadProgress>; // Progreso de subidas
   isLoading: boolean;                       // ¿Cargando lista?
   error: string | null;                     // Error global
@@ -56,6 +57,7 @@ interface MasterFilesState {
   // Acciones
   fetchFiles: (batchId?: string) => Promise<void>;
   uploadMasterFile: (file: File, fileType: MasterFileType) => Promise<void>;
+  setCicloEscolar: (ciclo: string) => void;
   deleteFile: (fileId: string) => Promise<void>;
   createNewBatch: () => void;
   canProcessBatch: () => Promise<boolean>;
@@ -90,9 +92,17 @@ export const useMasterFilesStore = create<MasterFilesState>((set, get) => ({
   // ============================================================================
   files: [],
   currentBatchId: crypto.randomUUID(), // Generar batch ID inicial
+  cicloEscolar: '2024-2025',
   uploadProgress: new Map(),
   isLoading: false,
   error: null,
+
+  // ============================================================================
+  // Acción: setCicloEscolar
+  // ============================================================================
+  setCicloEscolar: (ciclo: string) => {
+    set({ cicloEscolar: ciclo });
+  },
 
   // ============================================================================
   // Acción: fetchFiles
@@ -152,7 +162,7 @@ export const useMasterFilesStore = create<MasterFilesState>((set, get) => ({
    * 5. Actualizar lista de archivos
    *
    * @param file - Archivo Excel a subir
-   * @param fileType - Tipo de Master (alumnos, servicios, figuras, telefonia)
+   * @param fileType - Tipo de Master (alumnos, servicios, figuras)
    *
    * @throws Error si la validación o subida falla
    *
@@ -256,22 +266,23 @@ export const useMasterFilesStore = create<MasterFilesState>((set, get) => ({
 
       const masterId = dbResult.data.id;
 
-      // Actualizar progreso: registrado, iniciando validación
+      // Actualizar progreso: registrado, iniciando ingesta relacional
       set((state) => ({
         uploadProgress: new Map(state.uploadProgress).set(progressId, {
           fileType,
           fileName: file.name,
           progress: 80,
-          status: 'validating',
+          status: 'ingesting',
         }),
       }));
 
-      // 5. Disparar validación automática (Edge Function)
-      console.log(`🔍 Validando archivo: ${file.name}`);
-      const validationTrigger = await triggerValidation(masterId);
+      // 5. Disparar ingesta relacional (Edge Function ingest-master)
+      const { cicloEscolar } = get();
+      console.log(`🔍 Ingiriendo archivo: ${file.name} (ciclo ${cicloEscolar})`);
+      const ingestResult = await triggerIngest(masterId, cicloEscolar);
 
-      if (!validationTrigger.success) {
-        console.warn('⚠️ No se pudo disparar validación automática');
+      if (!ingestResult.success) {
+        throw new Error(ingestResult.error || 'Error ingiriendo Master');
       }
 
       // Actualizar progreso: completado
@@ -435,7 +446,7 @@ export const useMasterFilesStore = create<MasterFilesState>((set, get) => ({
 
       const { isComplete, count } = result.data;
 
-      console.log(`📊 Batch status: ${count}/4 archivos validados`);
+      console.log(`📊 Batch status: ${count}/3 archivos ingeridos`);
 
       return isComplete;
     } catch (err) {
@@ -484,11 +495,18 @@ export const useMasterFilesStore = create<MasterFilesState>((set, get) => ({
    * const alumnosFile = getFileByType('alumnos');
    */
   getFileByType: (fileType: MasterFileType) => {
-    const { files, currentBatchId } = get();
+    // Devuelve el archivo más reciente del tipo solicitado: primero busca en
+    // el batch actual; si no hay, devuelve el más reciente del ciclo escolar
+    // activo (los archivos vienen ordenados por created_at desc desde la BD).
+    const { files, currentBatchId, cicloEscolar } = get();
+    const inBatch = files.find(
+      (f) => f.file_type === fileType && f.upload_batch_id === currentBatchId,
+    );
+    if (inBatch) return inBatch;
     return (
       files.find(
-        (f) => f.file_type === fileType && f.upload_batch_id === currentBatchId
-      ) || null
+        (f) => f.file_type === fileType && (f.ciclo_escolar ?? null) === cicloEscolar,
+      ) ?? files.find((f) => f.file_type === fileType) ?? null
     );
   },
 

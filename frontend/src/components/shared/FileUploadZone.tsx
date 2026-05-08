@@ -43,7 +43,6 @@ const FILE_TYPE_LABELS: Record<MasterFileType, string> = {
   alumnos: 'Master de Alumnos',
   servicios: 'Master de Servicios',
   figuras: 'Master de Figuras',
-  telefonia: 'Master de Telefonía',
 };
 
 /**
@@ -53,7 +52,6 @@ const FILE_TYPE_KEYWORDS: Record<MasterFileType, string[]> = {
   alumnos: ['alumno', 'alumnos'],
   servicios: ['servicio', 'servicios'],
   figuras: ['figura', 'figuras'],
-  telefonia: ['telefon', 'telefonia'],
 };
 
 // ============================================================================

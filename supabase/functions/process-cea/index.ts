@@ -1,27 +1,23 @@
 /**
- * Edge Function: process-cea
- * ===========================
- * Procesa 4 archivos Master y genera un archivo CEA
+ * Edge Function: process-cea  (reescritura BD-driven)
+ * =====================================================
+ * Genera el archivo CEA leyendo de la BD (no de los Masters Excel) y
+ * rellenando la plantilla `CEA 25-26 VACIO.xlsx` alojada en el bucket
+ * `cea-templates`.
  *
- * Esta es la función MÁS IMPORTANTE del sistema.
- * Orquesta todo el flujo de procesamiento:
- *
- * 1. Valida que el usuario sea admin
- * 2. Verifica que haya exactamente 4 Masters validados en el batch
- * 3. Descarga los 4 archivos Master desde Storage
- * 4. Procesa cada archivo con SheetJS (lectura Excel)
- * 5. Fusiona los datos y genera el CONCENTRADO CEA
- * 6. Genera el archivo Excel con formato profesional
- * 7. Sube el CEA a Storage
- * 8. Actualiza la base de datos
- * 9. Marca el CEA como el más reciente (is_latest = true)
+ * Flujo:
+ *   1. Auth admin
+ *   2. Body: { ciclo_escolar: "25-26" }
+ *   3. Crear registro en cea_files (status=processing)
+ *   4. Bajar plantilla VACIO desde Storage
+ *   5. Cargar de la BD: ccts activos + figuras activas + bajas + agregados de
+ *      alumnos (excluye alumnos.baja y ccts.activo=false)
+ *   6. Rellenar las 4 hojas
+ *   7. Subir XLSX a `cea-files`, marcar latest=true, completed
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-
-// Importar utilidades compartidas
 import {
-  corsHeaders,
   corsErrorResponse,
   corsJsonResponse,
   handleCorsPreflightRequest,
@@ -31,289 +27,152 @@ import {
   isUserAdmin,
   getAuthenticatedUser,
 } from '../_shared/supabaseClient.ts';
-import type {
-  ProcessCeaRequest,
-  MasterFileType,
-} from '../_shared/types.ts';
-
-// Importar funciones de procesamiento
 import {
-  processMasterAlumnos,
-  processMasterServicios,
-  processMasterFiguras,
-  generarCEA,
-} from './utils/dataProcessor.ts';
-import {
-  generateCeaExcel,
-  formatCeaFileName,
-  validateCeaData,
-} from './utils/excelWriter.ts';
+  fetchCctsActivos,
+  fetchFigurasActivas,
+  fetchFigurasBajas,
+  aggAlumnosPorCct,
+} from './queryDb.ts';
+import { fillCeaTemplate } from './fillTemplate.ts';
 
-// ============================================================================
-// Handler Principal
-// ============================================================================
+const TEMPLATE_BUCKET = 'cea-templates';
+const TEMPLATE_PATH   = 'CEA_25-26_VACIO.xlsx';
+const CEA_BUCKET      = 'cea-files';
 
 serve(async (req: Request) => {
-  // 1. Manejar peticiones OPTIONS (preflight CORS)
-  if (req.method === 'OPTIONS') {
-    return handleCorsPreflightRequest();
-  }
+  if (req.method === 'OPTIONS') return handleCorsPreflightRequest();
+  if (req.method !== 'POST') return corsErrorResponse('Método no permitido', 405);
 
-  // 2. Solo aceptar peticiones POST
-  if (req.method !== 'POST') {
-    return corsErrorResponse('Método no permitido. Usa POST', 405);
-  }
-
-  // Timestamp de inicio para medir tiempo de procesamiento
   const startTime = Date.now();
 
   try {
-    console.log('🚀 ========================================');
-    console.log('🚀 Iniciando procesamiento de CEA');
-    console.log('🚀 ========================================');
-
-    // 3. Verificar que el usuario esté autenticado y sea admin
+    // 1. Auth
     const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return corsErrorResponse('No autenticado', 401);
-    }
+    if (!user) return corsErrorResponse('No autenticado', 401);
+    if (!(await isUserAdmin(req))) return corsErrorResponse('Solo administradores', 403);
 
-    if (!(await isUserAdmin(req))) {
-      return corsErrorResponse('Acceso denegado. Solo administradores', 403);
-    }
+    // 2. Body
+    const body = await req.json().catch(() => ({}));
+    const ciclo = (body.ciclo_escolar ?? body.ciclo ?? '').toString().trim();
+    if (!ciclo) return corsErrorResponse('Falta `ciclo_escolar` (ej. "25-26")', 400);
 
-    console.log(`✅ Usuario autenticado: ${user.email}`);
+    console.log(`🚀 process-cea: ciclo=${ciclo} user=${user.email}`);
 
-    // 4. Parsear el body del request
-    const body: ProcessCeaRequest = await req.json();
-    const { batchId } = body;
-
-    if (!batchId) {
-      return corsErrorResponse('Falta el parámetro requerido: batchId', 400);
-    }
-
-    console.log(`📦 Procesando batch: ${batchId}`);
-
-    // 5. Obtener el cliente de Supabase con privilegios de servicio
     const supabase = getSupabaseServiceClient(req);
+    const fileName = `CEA_${ciclo.replace(/[^0-9A-Za-z-]/g, '_')}_${formatDate()}.xlsx`;
+    const filePath = `${crypto.randomUUID()}_${fileName}`;
 
-    // 6. Obtener los 4 archivos Master del batch (validados o subidos)
-    const { data: masterFiles, error: fetchError } = await supabase
-      .from('master_uploads')
-      .select('*')
-      .eq('upload_batch_id', batchId)
-      .in('status', ['validated', 'uploaded']);
-
-    if (fetchError || !masterFiles) {
-      console.error('❌ Error obteniendo Masters:', fetchError);
-      return corsErrorResponse('Error obteniendo archivos Master', 500);
-    }
-
-    // 7. Verificar que haya exactamente 4 Masters (uno por tipo)
-    const uniqueTypes = new Set(masterFiles.map((f) => f.file_type));
-    if (uniqueTypes.size !== 4) {
+    // 3. Bajar plantilla
+    const { data: tplBlob, error: tplErr } = await supabase.storage
+      .from(TEMPLATE_BUCKET)
+      .download(TEMPLATE_PATH);
+    if (tplErr || !tplBlob) {
       return corsErrorResponse(
-        `Se requieren 4 archivos Master (uno por tipo). Encontrados: ${uniqueTypes.size} tipos de ${masterFiles.length} archivos`,
-        400
+        `No se pudo descargar plantilla ${TEMPLATE_BUCKET}/${TEMPLATE_PATH}: ${tplErr?.message}`,
+        500,
       );
     }
+    const tplBuf = await tplBlob.arrayBuffer();
 
-    console.log(`✅ Encontrados ${masterFiles.length} archivos Master validados`);
+    // 4. Datos desde BD
+    console.log('📥 leyendo BD…');
+    const [ccts, figurasActivas, figurasBajas, alumnosAggByCct] = await Promise.all([
+      fetchCctsActivos(supabase, ciclo),
+      fetchFigurasActivas(supabase, ciclo),
+      fetchFigurasBajas(supabase, ciclo),
+      aggAlumnosPorCct(supabase, ciclo),
+    ]);
+    console.log(`   ccts=${ccts.length}  figuras=${figurasActivas.length}  bajas=${figurasBajas.length}  cctsConAlumnos=${alumnosAggByCct.size}`);
 
-    // 8. Verificar que estén los 4 tipos requeridos
-    const fileTypes = masterFiles.map((f) => f.file_type);
-    const requiredTypes: MasterFileType[] = ['alumnos', 'servicios', 'figuras', 'telefonia'];
-    const missingTypes = requiredTypes.filter((t) => !fileTypes.includes(t));
-
-    if (missingTypes.length > 0) {
-      return corsErrorResponse(
-        `Faltan archivos Master de tipo: ${missingTypes.join(', ')}`,
-        400
-      );
+    if (ccts.length === 0) {
+      return corsErrorResponse(`No hay CCT activos para ciclo ${ciclo}`, 400);
     }
 
-    // 9. Crear registro inicial del CEA con estado 'processing'
-    const ceaFileName = formatCeaFileName();
-    const ceaFilePath = `${crypto.randomUUID()}_${ceaFileName}`;
-
-    console.log(`📝 Creando registro CEA: ${ceaFileName}`);
-
-    const { data: ceaRecord, error: ceaInsertError } = await supabase
-      .from('cea_files')
-      .insert({
-        file_name: ceaFileName,
-        file_path: ceaFilePath,
-        file_size: 0, // Se actualizará después
-        generated_from_batch: batchId,
-        processed_by: user.id,
-        processing_status: 'processing',
-        is_latest: false, // Se actualizará al final
-      })
-      .select()
-      .single();
-
-    if (ceaInsertError || !ceaRecord) {
-      console.error('❌ Error creando registro CEA:', ceaInsertError);
-      return corsErrorResponse('Error creando registro CEA', 500);
-    }
-
-    console.log(`✅ Registro CEA creado: ${ceaRecord.id}`);
-
-    // 10. Descargar y procesar cada archivo Master
-    console.log('📥 Descargando y procesando archivos Master...');
-
-    // Buscar cada tipo de archivo
-    const masterAlumnos = masterFiles.find((f) => f.file_type === 'alumnos')!;
-    const masterServicios = masterFiles.find((f) => f.file_type === 'servicios')!;
-    const masterFiguras = masterFiles.find((f) => f.file_type === 'figuras')!;
-
-    // Descargar Master de Alumnos
-    console.log(`📥 Descargando Master de Alumnos: ${masterAlumnos.file_name}`);
-    const { data: alumnosBlob, error: alumnosDownloadError } = await supabase.storage
-      .from('master-files')
-      .download(masterAlumnos.file_path);
-
-    if (alumnosDownloadError || !alumnosBlob) {
-      throw new Error(`Error descargando Master de Alumnos: ${alumnosDownloadError?.message}`);
-    }
-
-    // Descargar Master de Servicios
-    console.log(`📥 Descargando Master de Servicios: ${masterServicios.file_name}`);
-    const { data: serviciosBlob, error: serviciosDownloadError } = await supabase.storage
-      .from('master-files')
-      .download(masterServicios.file_path);
-
-    if (serviciosDownloadError || !serviciosBlob) {
-      throw new Error(`Error descargando Master de Servicios: ${serviciosDownloadError?.message}`);
-    }
-
-    // Descargar Master de Figuras
-    console.log(`📥 Descargando Master de Figuras: ${masterFiguras.file_name}`);
-    const { data: figurasBlob, error: figurasDownloadError } = await supabase.storage
-      .from('master-files')
-      .download(masterFiguras.file_path);
-
-    if (figurasDownloadError || !figurasBlob) {
-      throw new Error(`Error descargando Master de Figuras: ${figurasDownloadError?.message}`);
-    }
-
-    // 11. Procesar cada archivo Master
-    console.log('📊 Procesando datos de archivos Master...');
-
-    const alumnosData = await processMasterAlumnos(await alumnosBlob.arrayBuffer());
-    const serviciosData = await processMasterServicios(await serviciosBlob.arrayBuffer());
-    const figurasData = await processMasterFiguras(await figurasBlob.arrayBuffer());
-
-    console.log('✅ Archivos Master procesados exitosamente');
-
-    // 12. Generar CONCENTRADO CEA fusionando todos los datos
-    console.log('🔄 Generando CONCENTRADO CEA...');
-    const ceaData = generarCEA(alumnosData, serviciosData, figurasData);
-
-    // 13. Validar que los datos CEA sean correctos
-    validateCeaData(ceaData);
-
-    console.log(`✅ CONCENTRADO CEA generado: ${ceaData.length} microrregiones`);
-
-    // 14. Generar archivo Excel con formato
-    console.log('📝 Generando archivo Excel con formato...');
-    const excelBuffer = await generateCeaExcel(ceaData, {
-      sheetName: 'CONCENTRADO',
-      applyFormatting: true,
-      autoFitColumns: true,
+    // 5. Rellenar plantilla
+    console.log('📝 rellenando plantilla…');
+    const xlsx = await fillCeaTemplate({
+      templateBuffer: tplBuf,
+      ciclo,
+      ccts,
+      figurasActivas,
+      figurasBajas,
+      alumnosAggByCct,
     });
 
-    console.log(`✅ Archivo Excel generado: ${excelBuffer.byteLength} bytes`);
-
-    // 15. Subir archivo CEA a Storage
-    console.log(`📤 Subiendo CEA a Storage: ${ceaFilePath}`);
-
-    const { error: uploadError } = await supabase.storage
-      .from('cea-files')
-      .upload(ceaFilePath, excelBuffer, {
+    // 6. Subir a Storage
+    console.log(`📤 subiendo a ${CEA_BUCKET}/${filePath}…`);
+    const { error: upErr } = await supabase.storage
+      .from(CEA_BUCKET)
+      .upload(filePath, xlsx, {
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         upsert: false,
       });
-
-    if (uploadError) {
-      throw new Error(`Error subiendo CEA a Storage: ${uploadError.message}`);
+    if (upErr) {
+      return corsErrorResponse(`Error subiendo CEA: ${upErr.message}`, 500);
     }
 
-    console.log('✅ CEA subido a Storage exitosamente');
-
-    // 16. Calcular tiempo de procesamiento
-    const processingTimeMs = Date.now() - startTime;
-
-    // 17. Actualizar registro CEA con estado 'completed'
-    const { error: updateError } = await supabase
+    // 7. Insertar registro completo (la tabla exige file_size > 0, así que
+    //    insertamos al final con el tamaño real del archivo).
+    const elapsed = Date.now() - startTime;
+    const { data: ceaRecord, error: insErr } = await supabase
       .from('cea_files')
-      .update({
-        file_size: excelBuffer.byteLength,
+      .insert({
+        file_name: fileName,
+        file_path: filePath,
+        file_size: xlsx.byteLength,
+        generated_from_batch: crypto.randomUUID(), // ya no viene de un batch real
+        processed_by: user.id,
         processing_status: 'completed',
-        total_records: ceaData.length,
-        processing_time_ms: processingTimeMs,
-        is_latest: true, // Marcar como el más reciente
+        total_records: ccts.length,
+        processing_time_ms: elapsed,
+        is_latest: true,
       })
-      .eq('id', ceaRecord.id);
-
-    if (updateError) {
-      console.error('❌ Error actualizando registro CEA:', updateError);
-      // No fallar aquí, el archivo ya se subió exitosamente
+      .select()
+      .single();
+    if (insErr || !ceaRecord) {
+      console.error('❌ insert cea_files:', insErr);
+      // Limpiar el archivo que subimos para no dejar huérfanos
+      await supabase.storage.from(CEA_BUCKET).remove([filePath]);
+      return corsErrorResponse(`No se pudo crear el registro CEA: ${insErr?.message}`, 500);
     }
 
-    // 18. Marcar todos los CEAs anteriores como no-latest
-    await supabase
-      .from('cea_files')
-      .update({ is_latest: false })
-      .neq('id', ceaRecord.id)
-      .eq('is_latest', true);
+    // 8. Marcar CEAs anteriores como no-latest
+    await supabase.from('cea_files').update({ is_latest: false })
+      .neq('id', ceaRecord.id).eq('is_latest', true);
 
-    console.log('🎉 ========================================');
-    console.log(`🎉 CEA generado exitosamente en ${processingTimeMs}ms`);
-    console.log('🎉 ========================================');
+    console.log(`🎉 CEA generado en ${elapsed}ms — ${xlsx.byteLength} bytes`);
 
-    // 19. Retornar respuesta de éxito
     return corsJsonResponse({
       success: true,
-      message: 'CEA generado exitosamente',
       data: {
         ceaId: ceaRecord.id,
-        fileName: ceaFileName,
-        filePath: ceaFilePath,
-        totalRecords: ceaData.length,
-        processingTimeMs,
-        fileSize: excelBuffer.byteLength,
+        fileName,
+        filePath,
+        ciclo,
+        ccts: ccts.length,
+        figurasActivas: figurasActivas.length,
+        figurasBajas: figurasBajas.length,
+        processingTimeMs: elapsed,
+        fileSize: xlsx.byteLength,
       },
     });
-  } catch (error) {
-    console.error('❌ ========================================');
-    console.error('❌ Error en process-cea:', error);
-    console.error('❌ ========================================');
-
-    // Registrar error en processing_logs
-    try {
-      const supabase = getSupabaseServiceClient(req);
-      await supabase.from('processing_logs').insert({
-        level: 'error',
-        message: 'Error procesando CEA',
-        details: {
-          error: error.message,
-          stack: error.stack,
-        },
-      });
-    } catch (logError) {
-      console.error('❌ Error registrando log:', logError);
-    }
-
-    return corsErrorResponse(
-      'Error procesando CEA',
-      500,
-      {
-        message: error.message,
-        stack: Deno.env.get('DENO_ENV') === 'development' ? error.stack : undefined,
-      }
-    );
+  } catch (e) {
+    const err = e as Error;
+    console.error('❌ process-cea:', err.message, err.stack);
+    return corsErrorResponse('Error procesando CEA', 500, { message: err.message });
   }
 });
 
-console.log('🚀 Edge Function process-cea iniciada');
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+function formatDate(): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}_${mm}_${yyyy}`;
+}
+
+console.log('🚀 process-cea (BD-driven) iniciada');

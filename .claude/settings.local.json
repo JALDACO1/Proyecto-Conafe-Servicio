@@ -4,7 +4,8 @@
       "Bash(supabase:*)",
       "Bash(powershell:*)",
       "Bash(npm install:*)",
-      "Bash(npx supabase:*)"
+      "Bash(npx supabase:*)",
+      "Bash(MSYS_NO_PATHCONV=1 docker exec supabase-db psql -U supabase_admin -d postgres -c \"UPDATE public.profiles SET role='admin', full_name='Administrador CONAFE' WHERE id='d7e02ebe-5ee0-4867-9c56-ced3c78dd963'; SELECT id, email, role, full_name FROM public.profiles;\")"
     ]
   }
 }

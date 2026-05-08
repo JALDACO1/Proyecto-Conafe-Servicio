@@ -166,7 +166,6 @@ export function validateMasterFileName(
     alumnos: ['alumno', 'alumnos'],
     servicios: ['servicio', 'servicios'],
     figuras: ['figura', 'figuras'],
-    telefonia: ['telefon', 'telefonia'],
   };
 
   // Verificar si el nombre contiene alguna de las palabras clave
@@ -576,7 +575,6 @@ export function getMasterFileKeyword(fileType: MasterFileType): string {
     alumnos: 'alumno o alumnos',
     servicios: 'servicio o servicios',
     figuras: 'figura o figuras',
-    telefonia: 'telefon o telefonia',
   };
 
   return keywords[fileType];

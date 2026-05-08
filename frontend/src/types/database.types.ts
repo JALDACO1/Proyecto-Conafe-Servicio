@@ -51,11 +51,15 @@ export type Database = {
           file_name: string;
           file_path: string;
           file_size: number; // bigint
-          file_type: 'alumnos' | 'servicios' | 'figuras' | 'telefonia';
-          status: 'uploaded' | 'validating' | 'validated' | 'error';
+          file_type: 'alumnos' | 'servicios' | 'figuras';
+          status: 'uploaded' | 'validating' | 'validated' | 'ingesting' | 'ingested' | 'error';
           validation_errors: ValidationError[] | null; // JSONB
           record_count: number | null;
           upload_batch_id: string | null; // UUID
+          ciclo_escolar: string | null;
+          ingest_batch_id: string | null; // UUID
+          ingested_at: string | null;
+          ingest_stats: Record<string, number> | null; // JSONB
           created_at: string; // Timestamp ISO 8601
           updated_at: string; // Timestamp ISO 8601
         };
@@ -65,11 +69,15 @@ export type Database = {
           file_name: string;
           file_path: string;
           file_size: number;
-          file_type: 'alumnos' | 'servicios' | 'figuras' | 'telefonia';
-          status?: 'uploaded' | 'validating' | 'validated' | 'error';
+          file_type: 'alumnos' | 'servicios' | 'figuras';
+          status?: 'uploaded' | 'validating' | 'validated' | 'ingesting' | 'ingested' | 'error';
           validation_errors?: ValidationError[] | null;
           record_count?: number | null;
           upload_batch_id?: string | null;
+          ciclo_escolar?: string | null;
+          ingest_batch_id?: string | null;
+          ingested_at?: string | null;
+          ingest_stats?: Record<string, number> | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -79,11 +87,15 @@ export type Database = {
           file_name?: string;
           file_path?: string;
           file_size?: number;
-          file_type?: 'alumnos' | 'servicios' | 'figuras' | 'telefonia';
-          status?: 'uploaded' | 'validating' | 'validated' | 'error';
+          file_type?: 'alumnos' | 'servicios' | 'figuras';
+          status?: 'uploaded' | 'validating' | 'validated' | 'ingesting' | 'ingested' | 'error';
           validation_errors?: ValidationError[] | null;
           record_count?: number | null;
           upload_batch_id?: string | null;
+          ciclo_escolar?: string | null;
+          ingest_batch_id?: string | null;
+          ingested_at?: string | null;
+          ingest_stats?: Record<string, number> | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -275,12 +287,18 @@ export type ProcessingLogInsert = Database['public']['Tables']['processing_logs'
 /**
  * Tipos válidos de archivos Master
  */
-export type MasterFileType = 'alumnos' | 'servicios' | 'figuras' | 'telefonia';
+export type MasterFileType = 'alumnos' | 'servicios' | 'figuras';
 
 /**
- * Estados válidos de validación de Master
+ * Estados válidos de un Master upload
  */
-export type MasterUploadStatus = 'uploaded' | 'validating' | 'validated' | 'error';
+export type MasterUploadStatus =
+  | 'uploaded'
+  | 'validating'
+  | 'validated'
+  | 'ingesting'
+  | 'ingested'
+  | 'error';
 
 /**
  * Estados válidos de procesamiento de CEA
